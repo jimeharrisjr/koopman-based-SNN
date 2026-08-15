@@ -1,0 +1,42 @@
+[package]
+name = "kdmd-snn"
+version = "0.1.0"
+edition = "2021"
+# Inherited floor: koopman-dmd -> faer -> generativity requires 1.85.
+rust-version = "1.85"
+authors = ["James Harris <jimeharrisjr@gmail.com>"]
+description = "Spiking neural networks with Koopman-DMD linear-plus-control dynamics"
+license = "MIT"
+keywords = ["snn", "koopman", "dmd", "spiking", "neural-network"]
+categories = ["science", "simulation"]
+
+[dependencies]
+# faer MUST track koopman-dmd's faer minor version exactly: Mat<f64> crosses
+# the API boundary, and two semver-distinct faer versions would produce
+# incompatible types.
+faer = "0.22"
+# Statically built (no system libhdf5 needed; requires cmake at build time).
+# Only for the `datasets` feature: SHD loading in data::shd.
+hdf5-metno = { version = "0.14", features = ["static", "zlib"], optional = true }
+# 0.2 (dmdc) is unreleased: resolved via the workspace [patch.crates-io] to the
+# local rust-dmd checkout's `dmdc` branch until it is published.
+koopman-dmd = "0.2"
+rand = "0.9"
+thiserror = "2"
+
+[features]
+default = []
+## Event-based dataset loaders (SHD); pulls the statically-built HDF5 stack.
+datasets = ["dep:hdf5-metno"]
+
+[dev-dependencies]
+approx = "0.5"
+criterion = "0.5"
+
+[[bench]]
+name = "snn_bench"
+harness = false
+
+[[example]]
+name = "shd_demo"
+required-features = ["datasets"]
