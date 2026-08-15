@@ -1,0 +1,217 @@
+    Finished `release` profile [optimized] target(s) in 0.11s
+     Running `target/release/examples/v2_rollout`
+# V2 experiment — pre-registered protocol (docs/04-v2-preregistration.md)
+horizon 1000 ms · train I [3.0, 5.0, 7.0, 9.0, 11.0]
+
+## Ground-truth self-convergence (§1 contingency: h halved until < 0.1 ms shift at I = 13)
+- RS: ground-truth h = 0.0015625 ms (self-converged)
+- FS: ground-truth h = 0.0001953 ms (self-converged)
+- CH: ground-truth h = 0.0003906 ms (self-converged)
+
+## Euler cost–accuracy frontier — RS
+| h (ms) | flops/ms | verdict |
+|---|---|---|
+| 0.5 | 30 | fails accuracy |
+| 0.25 | 60 | fails accuracy |
+| 0.1 | 150 | fails accuracy |
+| 0.05 | 300 | fails accuracy |
+no Euler on the registered grid passes all accuracy gates
+
+## Euler cost–accuracy frontier — FS
+| h (ms) | flops/ms | verdict |
+|---|---|---|
+| 0.5 | 30 | fails accuracy |
+| 0.25 | 60 | fails accuracy |
+| 0.1 | 150 | fails accuracy |
+| 0.05 | 300 | fails accuracy |
+no Euler on the registered grid passes all accuracy gates
+
+## Surrogate grid — RS
+### degree 2, Δt* = 0.5 ms  (d = 9, holdout 8.38e-3, ρ 5.234929, I-row 1.76e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 12 | 0.143 | 0.071 | 0.80 | NaN | fail |
+| 10 | interp | 23 | 22 | 0.043 | 0.087 | 0.55 | 12.318 | fail |
+| 13 | extrap | 30 | 28 | 0.067 | 0.133 | 0.47 | 13.191 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.380 | PASS |
+| 4 | reported | 8 | 1 | 0.875 | 0.000 | 2.23 | NaN | n/a |
+cost: 180 flops/ms (C1 PASS), wall-clock ratio 0.4102 (C3 target ≤ 0.7)
+
+### degree 2, Δt* = 1 ms  (d = 9, holdout 1.34e-2, ρ 8.797694, I-row 6.58e-15 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 12 | 0.143 | 0.071 | 0.02 | NaN | fail |
+| 10 | interp | 23 | 21 | 0.087 | 0.130 | 0.20 | 11.479 | fail |
+| 13 | extrap | 30 | 28 | 0.067 | 0.167 | 0.36 | 14.640 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.438 | PASS |
+| 4 | reported | 8 | 6 | 0.250 | 0.125 | 0.24 | NaN | n/a |
+cost: 90 flops/ms (C1 PASS), wall-clock ratio 0.2001 (C3 target ≤ 0.7)
+
+### degree 2, Δt* = 2 ms  (d = 9, holdout 2.40e-2, ρ 12.046259, I-row 8.97e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 141 | 9.071 | 0.429 | 4.60 | 80.062 | fail |
+| 10 | interp | 23 | 19 | 0.174 | 0.087 | 6.91 | 11.691 | fail |
+| 13 | extrap | 30 | 440 | 13.667 | 0.933 | 38.09 | 11.263 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.284 | PASS |
+| 4 | reported | 8 | 145 | 17.125 | 0.625 | 2.04 | 104.414 | n/a |
+cost: 45 flops/ms (C1 PASS), wall-clock ratio 0.0972 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 0.5 ms  (d = 19, holdout 4.45e-3, ρ 23.547888, I-row 3.16e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 1103 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 93 (v = NaN, u = NaN) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 264 (v = NaN, u = NaN) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.515 | fail |
+| 4 | reported | 8 | 1 | 0.875 | 0.125 | 1.79 | NaN | n/a |
+cost: 760 flops/ms (C1 fail), wall-clock ratio 0.6685 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 1 ms  (d = 19, holdout 8.21e-3, ρ 56.592933, I-row 1.21e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 615 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 56 (v = NaN, u = NaN) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 36 (v = NaN, u = NaN) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.141 | PASS |
+| 4 | reported | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 45 (v = NaN, u = NaN) |
+cost: 380 flops/ms (C1 fail), wall-clock ratio 0.3492 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 2 ms  (d = 19, holdout 1.61e-2, ρ 113.803065, I-row 2.12e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 328 (v = inf, u = inf) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 134 (v = NaN, u = NaN) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 31 (v = NaN, u = NaN) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.468 | PASS |
+| 4 | reported | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 12 (v = -inf, u = -inf) |
+cost: 190 flops/ms (C1 PASS), wall-clock ratio 0.1840 (C3 target ≤ 0.7)
+
+## Surrogate grid — FS
+### degree 2, Δt* = 0.5 ms  (d = 9, holdout 1.33e-2, ρ 7.389343, I-row 2.07e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 42 | 0.323 | 0.113 | 0.99 | 15.059 | fail |
+| 10 | interp | 137 | 111 | 0.190 | 0.504 | 0.48 | 21.304 | fail |
+| 13 | extrap | 194 | 156 | 0.196 | 0.629 | 0.05 | 27.398 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.570 | fail |
+| 4 | reported | 25 | 0 | 1.000 | 0.000 | inf | NaN | n/a |
+cost: 180 flops/ms (C1 PASS), wall-clock ratio 0.0481 (C3 target ≤ 0.7)
+
+### degree 2, Δt* = 1 ms  (d = 9, holdout 2.34e-2, ρ 16.060868, I-row 5.10e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 55 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 154 (v = -inf, u = -inf) |
+| 13 | extrap | 194 | 391 | 1.015 | 0.918 | 64.50 | 50.738 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.785 | fail |
+| 4 | reported | 25 | 0 | 1.000 | 0.000 | inf | NaN | n/a |
+cost: 90 flops/ms (C1 PASS), wall-clock ratio 0.0225 (C3 target ≤ 0.7)
+
+### degree 2, Δt* = 2 ms  (d = 9, holdout 4.29e-2, ρ 30.808083, I-row 6.48e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 179 | 1.887 | 0.694 | 0.15 | 20.836 | fail |
+| 10 | interp | 137 | 0 | 1.000 | 0.000 | inf | NaN | fail |
+| 13 | extrap | 194 | 417 | 1.149 | 0.979 | 1.88 | 28.437 | fail |
+| 2 | sub-rheo | 0 | 249 | inf | 1.000 | inf | NaN | fail |
+| 4 | reported | 25 | 0 | 1.000 | 0.000 | inf | NaN | n/a |
+cost: 45 flops/ms (C1 PASS), wall-clock ratio 0.0120 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 0.5 ms  (d = 19, holdout 7.13e-3, ρ 36.361209, I-row 2.56e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 62 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 37 (v = NaN, u = NaN) |
+| 13 | extrap | 194 | 158 | 0.186 | 0.670 | 0.02 | 28.680 | fail |
+| 2 | sub-rheo | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 28 (v = NaN, u = NaN) |
+| 4 | reported | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 47 (v = NaN, u = NaN) |
+cost: 760 flops/ms (C1 fail), wall-clock ratio 0.0861 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 1 ms  (d = 19, holdout 1.54e-2, ρ 129.248325, I-row 2.86e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 33 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 9 (v = NaN, u = NaN) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 17 (v = NaN, u = NaN) |
+| 2 | sub-rheo | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 12 (v = NaN, u = NaN) |
+| 4 | reported | 25 | 0 | 1.000 | 0.000 | inf | NaN | n/a |
+cost: 380 flops/ms (C1 fail), wall-clock ratio 0.0000 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 2 ms  (d = 19, holdout 2.99e-2, ρ 349.891611, I-row 3.52e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 8 (v = inf, u = inf) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 11 (v = NaN, u = NaN) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 8 (v = NaN, u = NaN) |
+| 2 | sub-rheo | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 8 (v = NaN, u = NaN) |
+| 4 | reported | 25 | 0 | 1.000 | 0.000 | inf | NaN | n/a |
+cost: 190 flops/ms (C1 PASS), wall-clock ratio 0.0000 (C3 target ≤ 0.7)
+
+## Surrogate grid — CH (reported only)
+### degree 2, Δt* = 0.5 ms  (d = 9, holdout 1.55e-2, ρ 5.246720, I-row 8.96e-15 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 49 | 49 | 0.000 | 0.143 | 2.27 | 7.226 | fail |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 628 (v = inf, u = inf) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 632 (v = inf, u = inf) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.096 | PASS |
+| 4 | reported | 25 | 4 | 0.840 | 0.080 | 4.67 | NaN | n/a |
+cost: 180 flops/ms (C1 PASS), wall-clock ratio 0.1005 (C3 target ≤ 0.7)
+
+### degree 2, Δt* = 1 ms  (d = 9, holdout 2.80e-2, ρ 7.849197, I-row 2.11e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 49 | 46 | 0.061 | 0.184 | 1.32 | 7.019 | fail |
+| 10 | interp | 87 | 77 | 0.115 | 0.230 | 0.21 | 21.759 | fail |
+| 13 | extrap | 112 | 94 | 0.161 | 0.268 | 0.16 | 24.335 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.062 | PASS |
+| 4 | reported | 25 | 24 | 0.040 | 0.040 | 5.13 | NaN | n/a |
+cost: 90 flops/ms (C1 PASS), wall-clock ratio 0.0480 (C3 target ≤ 0.7)
+
+### degree 2, Δt* = 2 ms  (d = 9, holdout 4.22e-2, ρ 8.305477, I-row 2.81e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 49 | 125 | 1.551 | 0.367 | 5.77 | 14.468 | fail |
+| 10 | interp | 87 | 0 | 1.000 | 0.000 | inf | NaN | fail |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 89 (v = NaN, u = NaN) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 1.044 | fail |
+| 4 | reported | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 68 (v = -inf, u = -inf) |
+cost: 45 flops/ms (C1 PASS), wall-clock ratio 0.0241 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 0.5 ms  (d = 19, holdout 8.33e-3, ρ 19.959866, I-row 5.04e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 49 | 37 | 0.245 | 0.755 | 0.15 | 1.660 | fail |
+| 10 | interp | 87 | 76 | 0.126 | 0.264 | 0.19 | 19.182 | fail |
+| 13 | extrap | 112 | 101 | 0.098 | 0.473 | 0.26 | 12.692 | fail |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.039 | PASS |
+| 4 | reported | 25 | 3 | 0.880 | 0.120 | 3.94 | NaN | n/a |
+cost: 760 flops/ms (C1 fail), wall-clock ratio 0.1959 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 1 ms  (d = 19, holdout 1.59e-2, ρ 53.705726, I-row 3.38e-14 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 73 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 78 (v = inf, u = inf) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 38 (v = NaN, u = NaN) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.492 | PASS |
+| 4 | reported | 25 | 0 | 1.000 | 0.000 | inf | NaN | n/a |
+cost: 380 flops/ms (C1 fail), wall-clock ratio 0.0882 (C3 target ≤ 0.7)
+
+### degree 3, Δt* = 2 ms  (d = 19, holdout 2.83e-2, ρ 71.603606, I-row 2.95e-13 — PRECONDITION FAILED)
+| I | regime | ref N | sur N | count err | coinc ±2ms | first-spike err | v-RMSE | gates |
+|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 10 (v = NaN, u = NaN) |
+| 10 | interp | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 14 (v = NaN, u = NaN) |
+| 13 | extrap | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 14 (v = NaN, u = NaN) |
+| 2 | sub-rheo | 0 | 0 | 0.000 | 1.000 | 0.00 | 0.690 | fail |
+| 4 | reported | — | — | — | — | — | — | DIVERGED: numerical error: surrogate rollout diverged at step 13 (v = NaN, u = NaN) |
+cost: 190 flops/ms (C1 PASS), wall-clock ratio 0.0447 (C3 target ≤ 0.7)
+
+## Decision (§5)
+- RS: full PASS config exists: false; conditional route: false (C2 limit inf flops/ms)
+- FS: full PASS config exists: false; conditional route: false (C2 limit inf flops/ms)
+
+VERDICT: FAIL — pause for owner decision with skeptic re-review (§5 row 3)
+Record the outcome in docs/05-v2-results.md.

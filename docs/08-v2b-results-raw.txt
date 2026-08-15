@@ -1,0 +1,218 @@
+    Finished `release` profile [optimized] target(s) in 0.03s
+     Running `target/release/examples/v2b_return_map`
+# V2b return-map experiment — protocol docs/07-v2b-preregistration.md
+horizon 1000 ms · train I [3.0, 5.0, 7.0, 9.0, 11.0] · grid deg [2, 3, 4] × family {A, B}
+
+## Ground-truth self-convergence (re-verified)
+- RS: ground-truth h = 0.0015625 ms (self-converged, re-verified)
+- FS: ground-truth h = 0.0001953 ms (self-converged, re-verified)
+- CH: ground-truth h = 0.0003906 ms (self-converged, re-verified)
+
+## Return-map grid — RS
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 2 fam A (d = 6, samples 1117/765, cond 5.9e1/3.8e1, holdout ISI 2.16e-2, first 4.82e-1, contraction ["I5:0.10", "I7:0.10", "I9:0.11", "I11:0.12"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 13 | 0.071 | 0.020 | 1.31 | +3.4344% | 3.4491% | fail |
+| 10 | interp | 23 | 24 | 0.130 | 0.038 | 0.72 | -2.7522% | 2.8508% | fail |
+| 13 | extrap | 30 | 24 | 0.100 | 0.004 | 0.24 | +26.6787% | 26.7884% | fail |
+| 2 | sub-rheo | 0 | 7 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 8 | 9 | 0.000 | -0.037 | 3.81 | -20.6985% | 20.6993% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 1.7 flops/ms (C1 PASS vs 0.5×9600; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 3 fam A (d = 10, samples 1117/765, cond 8.4e2/9.6e2, holdout ISI 6.26e-3, first 5.19e-1, contraction ["I5:0.05", "I7:0.04", "I9:0.04", "I11:0.06"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 14 | 0.000 | -0.059 | 2.20 | +1.2014% | 1.2075% | fail |
+| 10 | interp | 23 | 23 | 0.261 | 0.186 | 0.11 | +0.9814% | 1.1546% | fail |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -0.1559705497623689 after 1 spikes |
+| 2 | sub-rheo | 0 | 6 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 8 | 9 | 0.125 | 0.092 | 1.77 | -15.5048% | 15.5049% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 4.6 flops/ms (C1 PASS vs 0.5×9600; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 4 fam A (d = 15, samples 1117/765, cond 5.6e3/2.3e4, holdout ISI 2.68e-3, first 4.46e-1, contraction ["I5:0.01", "I7:0.04", "I9:0.05", "I11:0.01"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 14 | 0.071 | 0.016 | 1.66 | +1.6397% | 1.6433% | fail |
+| 10 | interp | 23 | 23 | 0.174 | 0.090 | 0.32 | +1.6892% | 1.7196% | fail |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid first-spike prediction -1.2904933447436164 at I = 13 |
+| 2 | sub-rheo | 0 | 6 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 8 | 9 | 0.125 | 0.092 | 0.10 | -17.1538% | 17.1538% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 10.3 flops/ms (C1 PASS vs 0.5×9600; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 2 fam B (d = 8, samples 1117/765, cond 1.9e2/5.6e1, holdout ISI 1.05e-2, first 5.76e-1, contraction ["I5:0.07", "I7:0.12", "I9:0.12", "I11:0.11"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 14 | 0.500 | 0.470 | 1.37 | -0.5745% | 0.6440% | fail |
+| 10 | interp | 23 | 23 | 1.000 | 1.000 | 0.50 | -0.0980% | 0.6813% | PASS |
+| 13 | extrap | 30 | 29 | 0.033 | -0.094 | 1.06 | +2.9596% | 3.6724% | fail |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 8 | 1 | 0.000 | -0.004 | 5.77 | +244.3158% | 244.3647% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 3.7 flops/ms (C1 PASS vs 0.5×9600; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 3 fam B (d = 12, samples 1117/765, cond 1.2e3/1.1e3, holdout ISI 5.96e-3, first 5.62e-1, contraction ["I5:0.05", "I7:0.05", "I9:0.04", "I11:0.06"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 14 | 0.714 | 0.697 | 1.74 | -0.3412% | 0.3449% | fail |
+| 10 | interp | 23 | 23 | 1.000 | 1.000 | 0.26 | +0.0169% | 0.5634% | PASS |
+| 13 | extrap | 30 | 30 | 0.133 | 0.015 | 0.97 | -0.3116% | 1.0648% | fail |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 8 | 1 | 0.000 | -0.004 | 5.58 | +221.3720% | 221.4372% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 8.6 flops/ms (C1 PASS vs 0.5×9600; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 4 fam B (d = 17, samples 1117/765, cond 2.0e3/2.3e4, holdout ISI 2.68e-3, first 4.36e-1, contraction ["I5:0.01", "I7:0.04", "I9:0.05", "I11:0.01"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 14 | 14 | 0.429 | 0.395 | 1.23 | -0.7296% | 0.7764% | fail |
+| 10 | interp | 23 | 23 | 0.348 | 0.282 | 0.07 | -0.6622% | 0.7874% | fail |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid first-spike prediction -4.367199557268503 at I = 13 |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 8 | 1 | 0.000 | -0.004 | 3.79 | +239.3189% | 240.5402% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 13.3 flops/ms (C1 PASS vs 0.5×9600; C2 frontier carried: reference itself)
+
+RS: passing configuration exists: false
+
+## Return-map grid — FS
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 2 fam A (d = 6, samples 6330/731, cond 1.7e2/4.6e1, holdout ISI 3.03e-2, first 2.52e-1, contraction ["I5:0.03", "I7:0.07", "I9:0.16", "I11:0.23"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 59 | 0.226 | -0.013 | 0.13 | +3.8734% | 3.8861% | fail |
+| 10 | interp | 137 | 144 | 0.555 | -0.050 | 0.26 | -4.3459% | 4.4072% | fail |
+| 13 | extrap | 194 | 129 | 0.485 | -0.065 | 0.30 | +48.4848% | 49.0331% | fail |
+| 2 | sub-rheo | 0 | 24 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 25 | 37 | 0.120 | -0.033 | 7.46 | -27.5355% | 27.5574% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 10.4 flops/ms (C1 PASS vs 0.5×76900; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 3 fam A (d = 10, samples 6330/731, cond 2.6e3/1.1e3, holdout ISI 7.75e-3, first 2.67e-1, contraction ["I5:0.11", "I7:0.03", "I9:0.12", "I11:0.21"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 61 | 0.194 | -0.067 | 0.46 | +1.3542% | 1.4640% | fail |
+| 10 | interp | 137 | 135 | 0.474 | -0.142 | 0.11 | +1.1218% | 1.2020% | fail |
+| 13 | extrap | 194 | 312 | 1.000 | 0.000 | 0.37 | -31.6439% | 31.7143% | fail |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 25 | 34 | 0.040 | -0.111 | 5.99 | -23.0007% | 23.0171% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 62.4 flops/ms (C1 PASS vs 0.5×76900; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 4 fam A (d = 15, samples 6330/731, cond 3.8e4/2.7e4, holdout ISI 1.97e-3, first 2.32e-1, contraction ["I5:0.05", "I7:0.04", "I9:0.04", "I11:0.19"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 62 | 0.194 | -0.072 | 0.34 | +0.0416% | 0.3281% | fail |
+| 10 | interp | 137 | 138 | 0.401 | -0.336 | 0.27 | -2.0902% | 2.1183% | fail |
+| 13 | extrap | 194 | 125 | 0.500 | 0.000 | 1.58 | +89.3485% | 89.5855% | fail |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 25 | 33 | 0.200 | 0.078 | 5.06 | -20.2190% | 20.2249% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 62.1 flops/ms (C1 PASS vs 0.5×76900; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 2 fam B (d = 8, samples 6330/731, cond 5.6e2/5.8e1, holdout ISI 8.26e-3, first 3.19e-1, contraction ["I5:0.10", "I7:0.02", "I9:0.12", "I11:0.21"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 63 | 0.177 | -0.100 | 0.14 | -0.7898% | 1.1336% | fail |
+| 10 | interp | 137 | 138 | 0.453 | -0.222 | 0.25 | -0.6009% | 0.7818% | fail |
+| 13 | extrap | 194 | 173 | 0.691 | -0.004 | 0.44 | +11.9797% | 12.5093% | fail |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 25 | 1 | 0.000 | -0.004 | 7.83 | +236.9323% | 236.9829% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 22.1 flops/ms (C1 PASS vs 0.5×76900; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 3 fam B (d = 12, samples 6330/731, cond 4.0e3/1.2e3, holdout ISI 6.14e-3, first 3.15e-1, contraction ["I5:0.10", "I7:0.00", "I9:0.13", "I11:0.21"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 64 | 0.242 | -0.019 | 0.34 | -3.2588% | 3.2739% | fail |
+| 10 | interp | 137 | 140 | 0.584 | 0.054 | 0.13 | -2.7134% | 2.7393% | fail |
+| 13 | extrap | 194 | 131 | 0.505 | -0.040 | 0.66 | +63.1656% | 63.3116% | fail |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 25 | 1 | 0.000 | -0.004 | 7.02 | +464.4216% | 464.5868% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 40.3 flops/ms (C1 PASS vs 0.5×76900; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 4 fam B (d = 17, samples 6330/731, cond 4.0e4/2.7e4, holdout ISI 1.97e-3, first 2.46e-1, contraction ["I5:0.05", "I7:0.04", "I9:0.04", "I11:0.19"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | 62 | 64 | 0.258 | 0.003 | 0.23 | -2.9686% | 2.9721% | fail |
+| 10 | interp | 137 | 137 | 1.000 | 1.000 | 0.08 | +0.1567% | 0.5235% | PASS |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid first-spike prediction -1.3701913070103064 at I = 13 |
+| 2 | sub-rheo | 0 | 1 | 1.000 | 1.000 | inf | n/a | n/a | fail |
+| 4 | reported | 25 | 1 | 0.000 | -0.004 | 5.21 | +537.1599% | 539.0440% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 79.2 flops/ms (C1 PASS vs 0.5×76900; C2 frontier carried: reference itself)
+
+FS: passing configuration exists: false
+
+## Return-map grid — CH (reported only)
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 2 fam A (d = 6, samples 8575/1686, cond 3.3e1/3.5e1, holdout ISI 4.72e0, first 1.04e0, contraction ["I5:0.48", "I7:0.34", "I9:0.35", "I11:0.50"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -12.166862710153197 after 1 spikes |
+| 10 | interp | 87 | 4 | 0.023 | 0.007 | 0.90 | +36.2955% | 110.8360% | fail |
+| 13 | extrap | 112 | 3 | 0.009 | -0.003 | 1.06 | -106.8113% | 194.5364% | fail |
+| 2 | sub-rheo | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -4.852261805806037 after 1 spikes |
+| 4 | reported | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -14.299236081068898 after 1 spikes |
+I=3 in-sample quiescence: 0/10 · cost 0.3 flops/ms (C1 PASS vs 0.5×38400; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 3 fam A (d = 10, samples 8575/1686, cond 4.9e2/8.6e2, holdout ISI 3.25e0, first 7.12e-1, contraction ["I5:2.60", "I7:1.96", "I9:0.66", "I11:0.57"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -6.264456614724992 after 3 spikes |
+| 10 | interp | 87 | 55 | 0.138 | -0.105 | 0.36 | +63.6111% | 110.2283% | fail |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -34.85723899555114 after 1 spikes |
+| 2 | sub-rheo | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -0.055581419507205965 after 1 spikes |
+| 4 | reported | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -6.296947084669995 after 2 spikes |
+I=3 in-sample quiescence: 0/10 · cost 11.0 flops/ms (C1 PASS vs 0.5×38400; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 4 fam A (d = 15, samples 8575/1686, cond 6.9e3/1.8e4, holdout ISI 1.93e0, first 5.67e-1, contraction ["I5:1.39", "I7:0.37", "I9:0.26", "I11:1.35"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -0.6018945404481855 after 3 spikes |
+| 10 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -10.92838910495783 after 1 spikes |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid first-spike prediction -3.4731502690467337 at I = 13 |
+| 2 | sub-rheo | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -0.11377967938403799 after 1 spikes |
+| 4 | reported | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -0.704644176887598 after 2 spikes |
+I=3 in-sample quiescence: 0/10 · cost 0.0 flops/ms (C1 PASS vs 0.5×38400; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 2 fam B (d = 8, samples 8575/1686, cond 4.1e1/5.3e1, holdout ISI 4.73e0, first 7.01e-1, contraction ["I5:0.52", "I7:0.36", "I9:0.35", "I11:0.50"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -13.488862629555964 after 1 spikes |
+| 10 | interp | 87 | 4 | 0.023 | 0.007 | 0.03 | +36.6252% | 110.8246% | fail |
+| 13 | extrap | 112 | 2 | 0.009 | 0.001 | 1.96 | -108.0601% | 199.2968% | fail |
+| 2 | sub-rheo | 0 | 30 | 1.000 | 1.000 | inf | +201.6883% | 290.2844% | fail |
+| 4 | reported | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -6.015182895866062 after 1 spikes |
+I=3 in-sample quiescence: 0/10 · cost 3.8 flops/ms (C1 PASS vs 0.5×38400; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 3 fam B (d = 12, samples 8575/1686, cond 6.4e2/9.9e2, holdout ISI 3.27e0, first 6.40e-1, contraction ["I5:2.58", "I7:2.24", "I9:0.62", "I11:2.80"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -5.124000347316226 after 3 spikes |
+| 10 | interp | 87 | 54 | 0.138 | -0.100 | 0.07 | +72.5576% | 117.3387% | fail |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -33.133775962338454 after 1 spikes |
+| 2 | sub-rheo | 0 | 25 | 1.000 | 1.000 | inf | +405.4206% | 514.1248% | fail |
+| 4 | reported | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -16.619815478769198 after 1 spikes |
+I=3 in-sample quiescence: 0/10 · cost 15.6 flops/ms (C1 PASS vs 0.5×38400; C2 frontier carried: reference itself)
+
+(contingency applied: trajectory budget extended to meet data floors)
+### deg 4 fam B (d = 17, samples 8575/1686, cond 3.0e3/1.9e4, holdout ISI 1.92e0, first 5.57e-1, contraction ["I5:4.69", "I7:0.89", "I9:0.30", "I11:0.14"] — PRECONDITION FAILED)
+| I | regime | ref N | sur N | coinc | Γ | first err | A5 bias | A5 rms | gates |
+|---|---|---|---|---|---|---|---|---|---|
+| 6 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -3.1987345545482695 after 4 spikes |
+| 10 | interp | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -9.924243004428776 after 1 spikes |
+| 13 | extrap | — | — | — | — | — | — | — | INVALID: numerical error: invalid first-spike prediction -14.383206809012536 at I = 13 |
+| 2 | sub-rheo | — | — | — | — | — | — | — | INVALID: numerical error: invalid ISI prediction -96.76531975211026 after 1 spikes |
+| 4 | reported | 25 | 24 | 0.080 | -0.018 | 1.36 | +27.1474% | 141.7063% | n/a |
+I=3 in-sample quiescence: 0/10 · cost 0.0 flops/ms (C1 PASS vs 0.5×38400; C2 frontier carried: reference itself)
+
+
+VERDICT: FAIL — per the owner's standing decision: immediate pivot to V1/V3/V4; the nonlinear-surrogate track closes
+Record the outcome in docs/08-v2b-results.md.
