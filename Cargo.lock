@@ -780,6 +780,8 @@ dependencies = [
 [[package]]
 name = "koopman-dmd"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6557f08d160b6accde30d3730730371636ecfd1f74afa5bbedcf9611fc76abe9"
 dependencies = [
  "faer",
  "num-complex",

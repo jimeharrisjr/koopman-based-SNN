@@ -1,8 +1,3 @@
 [workspace]
 members = ["crates/kdmd-snn"]
 resolver = "2"
-
-# Develop against the local koopman-dmd checkout (and its `dmdc` branch once
-# Phase 3 starts). CI strips this section; remove before publishing kdmd-snn.
-[patch.crates-io]
-koopman-dmd = { path = "../rust-dmd/koopman-dmd" }

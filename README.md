@@ -38,35 +38,17 @@ protocol-before-results ordering rests on the documents' internal dating
 rather than commit-hash evidence — committing docs and results separately is
 the first step toward making the discipline externally verifiable.
 
-## Building — read this first
+## Building
 
-**A fresh clone does not build against crates.io today.** The crate depends on
-`koopman-dmd = "0.2"`, which is **not yet published**: the DMDc solver this
-project needs lives on the `dmdc` branch of the author's `rust-dmd` repository
-(slated for release as `koopman-dmd` 0.2.0). The workspace `[patch.crates-io]`
-section resolves the dependency to a **sibling checkout** instead:
-
-```text
-parent/
-├── kdmd-SNN/          # this repository (patch points at ../rust-dmd)
-└── rust-dmd/
-    └── koopman-dmd/   # `dmdc` branch checked out
-```
-
-Workaround until 0.2.0 ships: place a `rust-dmd` checkout with the `dmdc`
-branch next to this repository as shown, then build from this repository's
-root. (The `dmdc` branch currently exists only in the author's local checkout —
-it has not been pushed — so third parties cannot build until it is pushed or
-0.2.0 is published. CI strips the patch and will also fail until then.)
+The crate builds standalone against crates.io
+([`koopman-dmd` 0.2.0](https://crates.io/crates/koopman-dmd) carries the DMDc
+solver this project contributed upstream).
 
 Prerequisites:
 
 - **Rust 1.85+** (MSRV, inherited via `koopman-dmd` → `faer`).
 - **cmake** — only for `--features datasets` (HDF5 is compiled statically; no
   system libhdf5 is needed).
-
-Once `koopman-dmd` 0.2.0 is on crates.io, delete the `[patch.crates-io]`
-section from the root `Cargo.toml` and the crate builds standalone.
 
 ```sh
 cargo test --release          # library + oracle/equivalence/gradient tests
@@ -154,10 +136,10 @@ chance). The `datasets` feature builds HDF5 statically (needs `cmake`).
 
 The identification layer reuses `koopman-dmd` throughout (`dmd`, lifting,
 spectrum/stability/residual analysis, `pinv`). The **DMDc solver** this
-project needed was added to `koopman-dmd` on its `dmdc` branch (to be released
-as 0.2.0), together with two upstream bug fixes found during review. See
-[Building](#building--read-this-first) for how the unreleased dependency is
-resolved today.
+project needed was contributed upstream and released as
+[`koopman-dmd` 0.2.0](https://crates.io/crates/koopman-dmd)
+([rust-dmd#9](https://github.com/jimeharrisjr/rust-dmd/pull/9)), together with
+two upstream bug fixes found during review.
 
 ## License
 
