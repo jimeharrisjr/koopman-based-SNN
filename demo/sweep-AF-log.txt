@@ -1,0 +1,216 @@
+loading SHD …
+8156 train / 2264 test samples
+
+### [A] baseline 1x128 — pooled 100, hidden [128], 1500 minibatches
+  step   50: mean loss 3.0116
+  step  100: mean loss 2.9252
+  step  150: mean loss 2.7035
+  step  200: mean loss 2.4862
+  step  250: mean loss 2.3425
+  step  300: mean loss 2.2293
+  step  350: mean loss 2.1182
+  step  400: mean loss 2.0468
+  step  450: mean loss 1.9888
+  step  500: mean loss 1.8964
+  step  550: mean loss 1.8383
+  step  600: mean loss 1.7840
+  step  650: mean loss 1.7138
+  step  700: mean loss 1.6478
+  step  750: mean loss 1.6491
+  step  800: mean loss 1.5669
+  step  850: mean loss 1.5673
+  step  900: mean loss 1.5004
+  step  950: mean loss 1.4628
+  step 1000: mean loss 1.4253
+  step 1050: mean loss 1.4186
+  step 1100: mean loss 1.3995
+  step 1150: mean loss 1.3968
+  step 1200: mean loss 1.3487
+  step 1250: mean loss 1.3105
+  step 1300: mean loss 1.3014
+  step 1350: mean loss 1.2609
+  step 1400: mean loss 1.2980
+  step 1450: mean loss 1.2546
+  step 1500: mean loss 1.2210
+  RESULT [A]: test accuracy 0.6165 (1381/2240), final loss 1.2210, train 23.4s
+
+### [B] wide 1x256 — pooled 100, hidden [256], 1500 minibatches
+  step   50: mean loss 3.0533
+  step  100: mean loss 2.8854
+  step  150: mean loss 2.6066
+  step  200: mean loss 2.3635
+  step  250: mean loss 2.2035
+  step  300: mean loss 2.0763
+  step  350: mean loss 1.9362
+  step  400: mean loss 1.8400
+  step  450: mean loss 1.7869
+  step  500: mean loss 1.6839
+  step  550: mean loss 1.6127
+  step  600: mean loss 1.5698
+  step  650: mean loss 1.4997
+  step  700: mean loss 1.4296
+  step  750: mean loss 1.4324
+  step  800: mean loss 1.3652
+  step  850: mean loss 1.3744
+  step  900: mean loss 1.3115
+  step  950: mean loss 1.2817
+  step 1000: mean loss 1.2321
+  step 1050: mean loss 1.2307
+  step 1100: mean loss 1.2080
+  step 1150: mean loss 1.2158
+  step 1200: mean loss 1.1742
+  step 1250: mean loss 1.1262
+  step 1300: mean loss 1.1212
+  step 1350: mean loss 1.0925
+  step 1400: mean loss 1.1343
+  step 1450: mean loss 1.0849
+  step 1500: mean loss 1.0462
+  RESULT [B]: test accuracy 0.6272 (1405/2240), final loss 1.0462, train 42.1s
+
+### [C] wide 1x512 — pooled 100, hidden [512], 1500 minibatches
+  step   50: mean loss 3.1140
+  step  100: mean loss 2.8470
+  step  150: mean loss 2.5306
+  step  200: mean loss 2.2735
+  step  250: mean loss 2.0843
+  step  300: mean loss 1.9171
+  step  350: mean loss 1.7970
+  step  400: mean loss 1.6287
+  step  450: mean loss 1.5826
+  step  500: mean loss 1.5072
+  step  550: mean loss 1.4396
+  step  600: mean loss 1.4058
+  step  650: mean loss 1.3314
+  step  700: mean loss 1.2845
+  step  750: mean loss 1.2593
+  step  800: mean loss 1.2130
+  step  850: mean loss 1.2213
+  step  900: mean loss 1.1801
+  step  950: mean loss 1.1800
+  step 1000: mean loss 1.0998
+  step 1050: mean loss 1.0821
+  step 1100: mean loss 1.0513
+  step 1150: mean loss 1.0816
+  step 1200: mean loss 1.0548
+  step 1250: mean loss 1.0036
+  step 1300: mean loss 0.9885
+  step 1350: mean loss 1.0084
+  step 1400: mean loss 1.0043
+  step 1450: mean loss 0.9587
+  step 1500: mean loss 0.9224
+  RESULT [C]: test accuracy 0.6152 (1378/2240), final loss 0.9224, train 80.7s
+
+### [D] deep 256-128 — pooled 100, hidden [256, 128], 1500 minibatches
+  step   50: mean loss 3.0398
+  step  100: mean loss 2.9542
+  step  150: mean loss 2.6770
+  step  200: mean loss 2.4944
+  step  250: mean loss 2.3931
+  step  300: mean loss 2.2931
+  step  350: mean loss 2.1805
+  step  400: mean loss 2.1156
+  step  450: mean loss 2.0512
+  step  500: mean loss 1.9631
+  step  550: mean loss 1.9028
+  step  600: mean loss 1.8529
+  step  650: mean loss 1.7390
+  step  700: mean loss 1.6752
+  step  750: mean loss 1.6632
+  step  800: mean loss 1.5721
+  step  850: mean loss 1.5749
+  step  900: mean loss 1.4710
+  step  950: mean loss 1.4255
+  step 1000: mean loss 1.3817
+  step 1050: mean loss 1.3587
+  step 1100: mean loss 1.3279
+  step 1150: mean loss 1.3333
+  step 1200: mean loss 1.2578
+  step 1250: mean loss 1.2049
+  step 1300: mean loss 1.1819
+  step 1350: mean loss 1.1273
+  step 1400: mean loss 1.1561
+  step 1450: mean loss 1.1061
+  step 1500: mean loss 1.0857
+  RESULT [D]: test accuracy 0.6223 (1394/2240), final loss 1.0857, train 146.0s
+
+### [E] deep 128-128 — pooled 100, hidden [128, 128], 1500 minibatches
+  step   50: mean loss 3.0432
+  step  100: mean loss 2.9736
+  step  150: mean loss 2.8930
+  step  200: mean loss 2.8719
+  step  250: mean loss 2.8312
+  step  300: mean loss 2.7648
+  step  350: mean loss 2.7102
+  step  400: mean loss 2.6778
+  step  450: mean loss 2.6457
+  step  500: mean loss 2.6338
+  step  550: mean loss 2.5728
+  step  600: mean loss 2.5870
+  step  650: mean loss 2.5552
+  step  700: mean loss 2.4865
+  step  750: mean loss 2.4861
+  step  800: mean loss 2.4636
+  step  850: mean loss 2.3976
+  step  900: mean loss 2.3829
+  step  950: mean loss 2.3648
+  step 1000: mean loss 2.2084
+  step 1050: mean loss 2.1201
+  step 1100: mean loss 1.9640
+  step 1150: mean loss 1.8901
+  step 1200: mean loss 1.8334
+  step 1250: mean loss 1.7262
+  step 1300: mean loss 1.6843
+  step 1350: mean loss 1.5936
+  step 1400: mean loss 1.6008
+  step 1450: mean loss 1.5234
+  step 1500: mean loss 1.4492
+  RESULT [E]: test accuracy 0.4844 (1085/2240), final loss 1.4492, train 70.7s
+
+### [F] fine channels 350, 1x256 — pooled 350, hidden [256], 1500 minibatches
+  step   50: mean loss 2.9960
+  step  100: mean loss 2.8292
+  step  150: mean loss 2.5151
+  step  200: mean loss 2.2666
+  step  250: mean loss 2.0772
+  step  300: mean loss 1.9420
+  step  350: mean loss 1.8044
+  step  400: mean loss 1.6985
+  step  450: mean loss 1.6170
+  step  500: mean loss 1.5268
+  step  550: mean loss 1.4560
+  step  600: mean loss 1.4220
+  step  650: mean loss 1.3313
+  step  700: mean loss 1.2768
+  step  750: mean loss 1.2849
+  step  800: mean loss 1.2147
+  step  850: mean loss 1.1919
+  step  900: mean loss 1.1491
+  step  950: mean loss 1.1213
+  step 1000: mean loss 1.0397
+  step 1050: mean loss 1.0287
+  step 1100: mean loss 1.0063
+  step 1150: mean loss 0.9887
+  step 1200: mean loss 0.9711
+  step 1250: mean loss 0.8990
+  step 1300: mean loss 0.9069
+  step 1350: mean loss 0.8736
+  step 1400: mean loss 0.8748
+  step 1450: mean loss 0.8244
+  step 1500: mean loss 0.7946
+  RESULT [F]: test accuracy 0.6388 (1431/2240), final loss 0.7946, train 79.9s
+
+## Summary (chance = 0.050)
+| tag | test acc | final loss | train (s) |
+|---|---|---|---|
+| A | 0.6165 | 1.2210 | 23.4 |
+| B | 0.6272 | 1.0462 | 42.1 |
+| C | 0.6152 | 0.9224 | 80.7 |
+| D | 0.6223 | 1.0857 | 146.0 |
+| E | 0.4844 | 1.4492 | 70.7 |
+| F | 0.6388 | 0.7946 | 79.9 |
+curve A: 50:3.012 200:2.486 350:2.118 500:1.896 650:1.714 800:1.567 950:1.463 1100:1.399 1250:1.311 1400:1.298
+curve B: 50:3.053 200:2.363 350:1.936 500:1.684 650:1.500 800:1.365 950:1.282 1100:1.208 1250:1.126 1400:1.134
+curve C: 50:3.114 200:2.273 350:1.797 500:1.507 650:1.331 800:1.213 950:1.180 1100:1.051 1250:1.004 1400:1.004
+curve D: 50:3.040 200:2.494 350:2.181 500:1.963 650:1.739 800:1.572 950:1.426 1100:1.328 1250:1.205 1400:1.156
+curve E: 50:3.043 200:2.872 350:2.710 500:2.634 650:2.555 800:2.464 950:2.365 1100:1.964 1250:1.726 1400:1.601
+curve F: 50:2.996 200:2.267 350:1.804 500:1.527 650:1.331 800:1.215 950:1.121 1100:1.006 1250:0.899 1400:0.875

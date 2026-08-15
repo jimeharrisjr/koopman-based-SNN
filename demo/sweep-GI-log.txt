@@ -1,0 +1,136 @@
+loading SHD …
+8156 train / 2264 test samples
+
+### [G] long budget 1x256 (3000) — pooled 100, hidden [256], 3000 minibatches
+  step   50: mean loss 3.0533
+  step  100: mean loss 2.8854
+  step  150: mean loss 2.6066
+  step  200: mean loss 2.3635
+  step  250: mean loss 2.2035
+  step  300: mean loss 2.0763
+  step  350: mean loss 1.9362
+  step  400: mean loss 1.8400
+  step  450: mean loss 1.7869
+  step  500: mean loss 1.6839
+  step  550: mean loss 1.6127
+  step  600: mean loss 1.5698
+  step  650: mean loss 1.4997
+  step  700: mean loss 1.4296
+  step  750: mean loss 1.4324
+  step  800: mean loss 1.3652
+  step  850: mean loss 1.3744
+  step  900: mean loss 1.3115
+  step  950: mean loss 1.2817
+  step 1000: mean loss 1.2321
+  step 1050: mean loss 1.2307
+  step 1100: mean loss 1.2080
+  step 1150: mean loss 1.2158
+  step 1200: mean loss 1.1742
+  step 1250: mean loss 1.1262
+  step 1300: mean loss 1.1212
+  step 1350: mean loss 1.0925
+  step 1400: mean loss 1.1343
+  step 1450: mean loss 1.0849
+  step 1500: mean loss 1.0462
+  step 1550: mean loss 1.0739
+  step 1600: mean loss 1.0219
+  step 1650: mean loss 0.9974
+  step 1700: mean loss 1.0254
+  step 1750: mean loss 0.9676
+  step 1800: mean loss 0.9647
+  step 1850: mean loss 0.9868
+  step 1900: mean loss 0.9844
+  step 1950: mean loss 0.9676
+  step 2000: mean loss 0.9431
+  step 2050: mean loss 0.9526
+  step 2100: mean loss 0.9490
+  step 2150: mean loss 0.9153
+  step 2200: mean loss 0.8910
+  step 2250: mean loss 0.9571
+  step 2300: mean loss 0.9272
+  step 2350: mean loss 0.8506
+  step 2400: mean loss 0.8255
+  step 2450: mean loss 0.8581
+  step 2500: mean loss 0.8423
+  step 2550: mean loss 0.8575
+  step 2600: mean loss 0.8371
+  step 2650: mean loss 0.8447
+  step 2700: mean loss 0.8182
+  step 2750: mean loss 0.8020
+  step 2800: mean loss 0.8196
+  step 2850: mean loss 0.8094
+  step 2900: mean loss 0.8227
+  step 2950: mean loss 0.8206
+  step 3000: mean loss 0.7976
+  RESULT [G]: test accuracy 0.6080 (1362/2240), final loss 0.7976, train 86.5s
+
+### [I] long fine 350, 1x256 (3000) — pooled 350, hidden [256], 3000 minibatches
+  step   50: mean loss 2.9960
+  step  100: mean loss 2.8292
+  step  150: mean loss 2.5151
+  step  200: mean loss 2.2666
+  step  250: mean loss 2.0772
+  step  300: mean loss 1.9420
+  step  350: mean loss 1.8044
+  step  400: mean loss 1.6985
+  step  450: mean loss 1.6170
+  step  500: mean loss 1.5268
+  step  550: mean loss 1.4560
+  step  600: mean loss 1.4220
+  step  650: mean loss 1.3313
+  step  700: mean loss 1.2768
+  step  750: mean loss 1.2849
+  step  800: mean loss 1.2147
+  step  850: mean loss 1.1919
+  step  900: mean loss 1.1491
+  step  950: mean loss 1.1213
+  step 1000: mean loss 1.0397
+  step 1050: mean loss 1.0287
+  step 1100: mean loss 1.0063
+  step 1150: mean loss 0.9887
+  step 1200: mean loss 0.9711
+  step 1250: mean loss 0.8990
+  step 1300: mean loss 0.9069
+  step 1350: mean loss 0.8736
+  step 1400: mean loss 0.8748
+  step 1450: mean loss 0.8244
+  step 1500: mean loss 0.7946
+  step 1550: mean loss 0.8165
+  step 1600: mean loss 0.7614
+  step 1650: mean loss 0.7514
+  step 1700: mean loss 0.7445
+  step 1750: mean loss 0.7131
+  step 1800: mean loss 0.6833
+  step 1850: mean loss 0.7148
+  step 1900: mean loss 0.6853
+  step 1950: mean loss 0.6602
+  step 2000: mean loss 0.6512
+  step 2050: mean loss 0.6374
+  step 2100: mean loss 0.6495
+  step 2150: mean loss 0.6200
+  step 2200: mean loss 0.5677
+  step 2250: mean loss 0.6159
+  step 2300: mean loss 0.6052
+  step 2350: mean loss 0.5281
+  step 2400: mean loss 0.5198
+  step 2450: mean loss 0.5220
+  step 2500: mean loss 0.5140
+  step 2550: mean loss 0.5339
+  step 2600: mean loss 0.5527
+  step 2650: mean loss 0.5219
+  step 2700: mean loss 0.4906
+  step 2750: mean loss 0.4808
+  step 2800: mean loss 0.4619
+  step 2850: mean loss 0.4777
+  step 2900: mean loss 0.4725
+  step 2950: mean loss 0.4732
+  step 3000: mean loss 0.4536
+  RESULT [I]: test accuracy 0.6795 (1522/2240), final loss 0.4536, train 159.4s
+
+## Summary (chance = 0.050)
+| tag | test acc | final loss | train (s) |
+|---|---|---|---|
+| G | 0.6080 | 0.7976 | 86.5 |
+| I | 0.6795 | 0.4536 | 159.4 |
+curve G: 50:3.053 200:2.363 350:1.936 500:1.684 650:1.500 800:1.365 950:1.282 1100:1.208 1250:1.126 1400:1.134 1550:1.074 1700:1.025 1850:0.987 2000:0.943 2150:0.915 2300:0.927 2450:0.858 2600:0.837 2750:0.802 2900:0.823
+curve I: 50:2.996 200:2.267 350:1.804 500:1.527 650:1.331 800:1.215 950:1.121 1100:1.006 1250:0.899 1400:0.875 1550:0.816 1700:0.744 1850:0.715 2000:0.651 2150:0.620 2300:0.605 2450:0.522 2600:0.553 2750:0.481 2900:0.473

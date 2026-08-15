@@ -38,3 +38,7 @@ harness = false
 [[example]]
 name = "shd_demo"
 required-features = ["datasets"]
+
+[[example]]
+name = "shd_sweep"
+required-features = ["datasets"]
