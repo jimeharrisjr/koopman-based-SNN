@@ -65,3 +65,16 @@ output: `sweep-AF-log.txt`, `sweep-GI-log.txt`. Headline outcomes:
 - **Interaction finding**: input resolution and training budget must be
   tuned together — the same budget increase that helped at 2:1 pooling hurt
   at 7:1.
+
+### Round 2 (tags J–O): the next steps, tried
+
+- **New best: 0.808** — a **recurrent** hidden layer (zero-initialized
+  W_rec, grown entirely by the through-time gradient) on the round-1 winner
+  config: +12.8 points in a single change, inside the published
+  recurrent-SNN band for SHD. Required new library support (recurrence in
+  `KoopmanLayer` + BPTT through the recurrent path), all test-gated.
+- **Everything else was flat or negative**: 6000-minibatch budgets overfit
+  on both the feedforward (0.671) and recurrent (0.777, train loss 0.04)
+  sides; unpooled 700-channel input reversed the resolution gains (0.664);
+  balanced minibatches and lr decay did nothing at this scale.
+- Cumulative: **0.502 → 0.680 → 0.808** across the two rounds.

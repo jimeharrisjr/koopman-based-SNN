@@ -79,6 +79,8 @@ pub struct Trainer {
     /// Readout `n_classes × n_out`.
     r: Mat<f64>,
     opt_w: Vec<Adam>,
+    /// Optimizer state for recurrent weights, per layer (None = feedforward).
+    opt_rec: Vec<Option<Adam>>,
     opt_r: Adam,
 }
 
@@ -97,21 +99,36 @@ impl Trainer {
             0.01 * ((i + 2 * j) % 5) as f64 - 0.02
         });
         let mut opt_w = Vec::with_capacity(net.n_layers());
+        let mut opt_rec = Vec::with_capacity(net.n_layers());
         for l in 0..net.n_layers() {
             let w = net.layer(l).weights();
             opt_w.push(Adam::new(w.nrows(), w.ncols()));
+            opt_rec.push(
+                net.layer(l)
+                    .recurrent_weights()
+                    .map(|wr| Adam::new(wr.nrows(), wr.ncols())),
+            );
         }
         let opt_r = Adam::new(n_classes, n_out);
         Ok(Self {
             cfg,
             r,
             opt_w,
+            opt_rec,
             opt_r,
         })
     }
 
     pub fn readout(&self) -> &Mat<f64> {
         &self.r
+    }
+
+    /// Change the learning rate in place (for decay schedules). Optimizer
+    /// moments are preserved.
+    pub fn set_learning_rate(&mut self, new_lr: f64) {
+        match &mut self.cfg.optim {
+            OptimConfig::Sgd { lr, .. } | OptimConfig::Adam { lr, .. } => *lr = new_lr,
+        }
     }
 
     /// Forward pass with tape; returns (per-step v_pre, per-step s_out,
@@ -283,8 +300,22 @@ impl Trainer {
         let mut dldd: Vec<Mat<f64>> = (0..n_layers)
             .map(|l| Mat::zeros(net.layer(l).n_neurons(), batch))
             .collect();
+        // ∂L/∂d at step t+1 (consumed by the recurrent path: the layer's
+        // spikes at t drove its own input at t+1). Double-buffered with dldd.
+        let mut dldd_next: Vec<Mat<f64>> = dldd.clone();
+        // Recurrent-weight gradients, where present.
+        let mut grad_rec: Vec<Option<Mat<f64>>> = (0..n_layers)
+            .map(|l| {
+                net.layer(l)
+                    .recurrent_weights()
+                    .map(|wr| Mat::zeros(wr.nrows(), wr.ncols()))
+            })
+            .collect();
 
         for t in (0..t_steps).rev() {
+            // dldd currently holds step t+1's values (zero at t = T−1);
+            // stash them for the recurrent path and overwrite dldd below.
+            std::mem::swap(&mut dldd, &mut dldd_next);
             for l in (0..n_layers).rev() {
                 let n = net.layer(l).n_neurons();
                 let k = net.layer(l).n_state_vars();
@@ -307,6 +338,20 @@ impl Trainer {
                             let mut acc = 0.0;
                             for i in 0..w_next.nrows() {
                                 acc += w_next[(i, j)] * d_next[(i, b)];
+                            }
+                            g_s[(j, b)] += acc;
+                        }
+                    }
+                }
+                // Recurrent path: this layer's spikes at t drove its own
+                // input at t+1 through W_rec.
+                if let Some(w_rec) = net.layer(l).recurrent_weights() {
+                    let d_next = &dldd_next[l];
+                    for b in 0..batch {
+                        for j in 0..n {
+                            let mut acc = 0.0;
+                            for i in 0..n {
+                                acc += w_rec[(i, j)] * d_next[(i, b)];
                             }
                             g_s[(j, b)] += acc;
                         }
@@ -359,6 +404,23 @@ impl Trainer {
                         }
                     }
                 }
+                // ∂L/∂W_rec += ∂L/∂d_t · s_own(t−1)ᵀ (t = 0 saw zero
+                // recurrent input — the post-reset convention).
+                if t > 0 {
+                    if let Some(grad) = grad_rec[l].as_mut() {
+                        let s_prev = s_out_tape[t - 1][l].as_mat();
+                        for b in 0..batch {
+                            for j in 0..n {
+                                if s_prev[(j, b)] == 0.0 {
+                                    continue;
+                                }
+                                for i in 0..n {
+                                    grad[(i, j)] += dldd[l][(i, b)];
+                                }
+                            }
+                        }
+                    }
+                }
                 // λ ← Aᵀ·∂L/∂y (the exact linear-part Jacobian).
                 net.layer(l).operator().apply_transpose(
                     dldy[l].as_ref(),
@@ -370,7 +432,11 @@ impl Trainer {
 
         // Clip + update.
         if let Some(clip) = self.cfg.grad_clip {
-            for g in grad_w.iter_mut().chain(std::iter::once(&mut grad_r)) {
+            for g in grad_w
+                .iter_mut()
+                .chain(grad_rec.iter_mut().flatten())
+                .chain(std::iter::once(&mut grad_r))
+            {
                 for b in 0..g.ncols() {
                     for i in 0..g.nrows() {
                         g[(i, b)] = g[(i, b)].clamp(-clip, clip);
@@ -380,6 +446,13 @@ impl Trainer {
         }
         for (l, (opt, grad)) in self.opt_w.iter_mut().zip(&grad_w).enumerate() {
             opt.update(net.layer_mut(l).weights_mut(), grad, &self.cfg.optim);
+        }
+        for (l, (opt_slot, grad_slot)) in self.opt_rec.iter_mut().zip(&grad_rec).enumerate() {
+            if let (Some(opt), Some(grad)) = (opt_slot.as_mut(), grad_slot.as_ref()) {
+                if let Some(w_rec) = net.layer_mut(l).recurrent_weights_mut() {
+                    opt.update(w_rec, grad, &self.cfg.optim);
+                }
+            }
         }
         let mut r = std::mem::replace(&mut self.r, Mat::zeros(0, 0));
         self.opt_r.update(&mut r, &grad_r, &self.cfg.optim);

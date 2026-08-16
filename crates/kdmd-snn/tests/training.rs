@@ -123,6 +123,52 @@ fn multi_layer_bptt_reduces_loss_and_stays_finite() {
 }
 
 #[test]
+fn recurrent_bptt_reduces_loss_and_grows_recurrence_from_zero() {
+    // Zero-initialized W_rec makes the recurrent net exactly the feedforward
+    // net at step 0; training must (a) stay finite, (b) reduce the loss, and
+    // (c) actually move W_rec — proving the through-time gradient path works.
+    let lif = Lif::new(LifParams {
+        dt: DT,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let mut rng = StdRng::seed_from_u64(37);
+    let w = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+    let layer = KoopmanLayer::lif(&lif, N_HIDDEN, w, BATCH)
+        .unwrap()
+        .with_recurrent(Mat::zeros(N_HIDDEN, N_HIDDEN))
+        .unwrap();
+    let mut net = Network::new(vec![layer], BATCH).unwrap();
+    let mut trainer = Trainer::new(&net, N_CLASSES, TrainConfig::default()).unwrap();
+
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let mut losses = Vec::new();
+    for step in 0..200 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.7 * early,
+        "recurrent training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+    let w_rec = net.layer(0).recurrent_weights().unwrap();
+    let mut max_abs = 0.0f64;
+    for j in 0..w_rec.ncols() {
+        for i in 0..w_rec.nrows() {
+            max_abs = max_abs.max(w_rec[(i, j)].abs());
+        }
+    }
+    assert!(
+        max_abs > 1e-6,
+        "W_rec never moved from zero — the recurrent gradient path is dead"
+    );
+}
+
+#[test]
 fn mismatched_trainer_and_network_error_instead_of_panicking() {
     let lif = Lif::new(LifParams {
         dt: DT,

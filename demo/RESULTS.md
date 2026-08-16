@@ -80,9 +80,69 @@ I = F continued: 0.82 (1550) → 0.65 (2000) → 0.47 (2900)         [test rose 
   long budget) used the equal-budget winner F, with G as the budget-only
   control.
 
-## Obvious next steps (untried)
+## Round 2 — the "untried next steps," tried
 
-Finer pooling still (700 channels, no pooling), longer budget on I (its loss
-was still falling), label-balanced minibatches, learning-rate decay, and —
-the big one from the literature — recurrent connections within the hidden
-layer.
+All previously-listed next steps were run (raw logs: `sweep-JN-log.txt`,
+`sweep-O-log.txt`). Recurrence required library support first: recurrent
+weights in `KoopmanLayer` (previous-step own-spikes feed back into the drive),
+BPTT through the recurrent path, per-matrix Adam state, and
+`Trainer::set_learning_rate` for decay — all test-gated (self-excitation
+echo/reset, zero-recurrence ≡ feedforward exactness, gradient-flow-from-zero).
+
+| tag | variation (base: 350 ch, 1 × 256, 3000 mb) | **test acc** | final train loss | train time |
+|---|---|---|---|---|
+| **L** | **recurrent hidden layer (W_rec zero-init)** | **0.808** | 0.183 | 654 s |
+| O | recurrent + 6000 mb + lr ×0.3 @4000 | 0.777 | 0.038 | 1316 s |
+| K | feedforward, 6000 mb | 0.671 | 0.158 | 319 s |
+| M | label-balanced minibatches | 0.668 | 0.463 | 158 s |
+| J | no pooling (700 channels) | 0.664 | 0.329 | 218 s |
+| N | lr ×0.3 @2000 | 0.661 | 0.530 | 159 s |
+
+*(Round-1 best for reference: I = 0.680.)*
+
+### Round-2 findings
+
+**What worked — one thing, spectacularly:**
+
+- **Recurrence: +12.8 points in one move (0.680 → 0.808).** The recurrent
+  matrix was initialized to zero — exactly the feedforward network at step
+  0 — and the through-time gradient grew task-relevant recurrence from
+  nothing. The loss curves show it wasn't a late-training effect: the
+  recurrent net was far ahead by step 650 (0.87 vs ~1.3 for every
+  feedforward variant). 0.808 sits inside the published recurrent-SNN band
+  for SHD (~0.71–0.83). Attribution is clean because *every other axis in
+  this round was flat or negative*.
+
+**What didn't work:**
+
+- **More budget, again — now on both sides.** Feedforward K (6000 mb):
+  0.671 < I's 0.680. Recurrent O (6000 mb + decay): 0.777 < L's 0.808, with
+  train loss driven to 0.04 — near-memorization. At this model/data scale,
+  ~3000 minibatches is the generalization sweet spot, and the ×0.3 decay
+  did not rescue the overtrained regime.
+- **Full input resolution (J, 700 ch): 0.664.** Resolution helped from 7:1
+  to 2:1 pooling and *reversed* at 1:1 — more input detail without more
+  regularization or data just gives the fit more to memorize (train loss
+  0.33, among the lowest, test among the worst).
+- **Balanced minibatches (M) and lr decay (N): no effect** (−1.2 / −1.9,
+  order of seed noise). SHD's classes are already near-balanced, and the
+  budget is too short for a decay schedule to matter.
+
+### Cumulative journey
+
+| stage | configuration | test acc |
+|---|---|---|
+| original demo | 100 ch, 1 × 128, 600 mb, 512-sample eval | 0.502 |
+| round 1 best (I) | 350 ch, 1 × 256, 3000 mb | 0.680 |
+| **round 2 best (L)** | **+ recurrent hidden layer** | **0.808** |
+
++30.6 points total; ~11 minutes of single-thread laptop training for the
+final model.
+
+## Remaining next steps (untried)
+
+Regularization to unlock the overtrained regimes (dropout-style spike
+masking, weight decay — nothing of the sort exists in the trainer yet),
+two recurrent layers, recurrent + 700 channels *with* regularization,
+τ-heterogeneity across neurons, and data augmentation (time-jitter/channel
+noise), which is how the published >0.83 results get there.

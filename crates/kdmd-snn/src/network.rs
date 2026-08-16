@@ -121,10 +121,14 @@ impl Network {
         Ok(())
     }
 
-    /// Zero every layer state (start of a new trial).
+    /// Zero every layer state and all episodic recurrent state (start of a
+    /// new trial).
     pub fn reset_state(&mut self) {
         for s in &mut self.states {
             s.fill(0.0);
+        }
+        for l in &mut self.layers {
+            l.reset_recurrent();
         }
     }
 

@@ -46,6 +46,13 @@ pub struct KoopmanLayer {
     theta: f64,
     n_neurons: usize,
     n_state_vars: usize,
+    /// Optional recurrent weights (`n_neurons × n_neurons`): the layer's own
+    /// spikes from the **previous** step feed back into the drive.
+    w_rec: Option<Mat<f64>>,
+    /// The layer's own spikes at the previous step (`n × batch`); episodic
+    /// state — cleared by [`reset_recurrent`](Self::reset_recurrent), which
+    /// [`Network::reset_state`](crate::Network::reset_state) calls.
+    prev_spikes: Mat<f64>,
     // Scratch, allocated once: next-state buffer and drive buffer.
     y: Mat<f64>,
     drive: Mat<f64>,
@@ -126,10 +133,51 @@ impl KoopmanLayer {
             theta,
             n_neurons,
             n_state_vars,
+            w_rec: None,
+            prev_spikes: Mat::zeros(n_neurons, batch),
             y: Mat::zeros(dim, batch),
             drive: Mat::zeros(n_neurons, batch),
             w_in,
         })
+    }
+
+    /// Add recurrent connections: the layer's own previous-step spikes feed
+    /// back through `w_rec` (`n_neurons × n_neurons`) into the same drive
+    /// path as the feedforward input. Zero-initializing `w_rec` reproduces
+    /// the feedforward layer exactly, letting training grow recurrence from
+    /// nothing.
+    pub fn with_recurrent(mut self, w_rec: Mat<f64>) -> Result<Self, SnnError> {
+        if w_rec.nrows() != self.n_neurons || w_rec.ncols() != self.n_neurons {
+            return Err(SnnError::DimensionMismatch(format!(
+                "recurrent weights are {}×{}, expected {}×{}",
+                w_rec.nrows(),
+                w_rec.ncols(),
+                self.n_neurons,
+                self.n_neurons
+            )));
+        }
+        self.w_rec = Some(w_rec);
+        Ok(self)
+    }
+
+    /// Recurrent weights, if the layer has them.
+    pub fn recurrent_weights(&self) -> Option<&Mat<f64>> {
+        self.w_rec.as_ref()
+    }
+
+    /// Mutable recurrent weights (training updates them).
+    pub fn recurrent_weights_mut(&mut self) -> Option<&mut Mat<f64>> {
+        self.w_rec.as_mut()
+    }
+
+    /// Clear the episodic recurrent state (previous-step spikes). Called at
+    /// the start of a trial via `Network::reset_state`.
+    pub fn reset_recurrent(&mut self) {
+        for b in 0..self.prev_spikes.ncols() {
+            for i in 0..self.prev_spikes.nrows() {
+                self.prev_spikes[(i, b)] = 0.0;
+            }
+        }
     }
 
     /// The exact-linear LIF layer: `A = A_local ⊗ I_N` from the closed-form
@@ -251,6 +299,17 @@ impl KoopmanLayer {
                 self.drive[(i, 0)] += self.w_in[(i, j)];
             }
         }
+        // 1b. Recurrent drive from the layer's own previous-step spikes.
+        if let Some(w_rec) = &self.w_rec {
+            for j in 0..n {
+                if self.prev_spikes[(j, 0)] == 0.0 {
+                    continue;
+                }
+                for i in 0..n {
+                    self.drive[(i, 0)] += w_rec[(i, j)];
+                }
+            }
+        }
 
         // 2. Linear advance plus input coupling.
         self.a.apply(state.as_mat(), self.y.as_mut(), false);
@@ -276,6 +335,14 @@ impl KoopmanLayer {
         let mut sm = state.as_mat_mut();
         for i in 0..n * self.n_state_vars {
             sm[(i, 0)] = self.y[(i, 0)];
+        }
+        if self.w_rec.is_some() {
+            for i in 0..n {
+                self.prev_spikes[(i, 0)] = 0.0;
+            }
+            for &j in out.active() {
+                self.prev_spikes[(j as usize, 0)] = 1.0;
+            }
         }
         Ok(())
     }
@@ -358,6 +425,19 @@ impl KoopmanLayer {
                 }
             }
         }
+        // 1b. Recurrent drive from the layer's own previous-step spikes.
+        if let Some(w_rec) = &self.w_rec {
+            for b in 0..batch {
+                for j in 0..n {
+                    if self.prev_spikes[(j, b)] == 0.0 {
+                        continue;
+                    }
+                    for i in 0..n {
+                        self.drive[(i, b)] += w_rec[(i, j)];
+                    }
+                }
+            }
+        }
 
         // 2. Advance + coupling.
         self.a.apply(state.as_mat(), self.y.as_mut(), false);
@@ -397,6 +477,13 @@ impl KoopmanLayer {
         for b in 0..batch {
             for i in 0..n * self.n_state_vars {
                 sm[(i, b)] = self.y[(i, b)];
+            }
+        }
+        if self.w_rec.is_some() {
+            for b in 0..batch {
+                for i in 0..n {
+                    self.prev_spikes[(i, b)] = out.as_mat()[(i, b)];
+                }
             }
         }
         Ok(())
@@ -473,6 +560,91 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn recurrent_self_excitation_sustains_and_reset_silences() {
+        // Strong self-excitation: after a single kick, the layer keeps
+        // itself firing with no further input; reset_recurrent (plus a state
+        // reset) returns it to silence.
+        let lif = Lif::new(LifParams {
+            dt: 1.0,
+            ..LifParams::default()
+        })
+        .unwrap();
+        let n = 4;
+        let w_rec = Mat::from_fn(n, n, |_, _| 4.0);
+        let mut layer = KoopmanLayer::lif(&lif, n, identity_w(n), 1)
+            .unwrap()
+            .with_recurrent(w_rec)
+            .unwrap();
+        let mut state = LayerState::zeros(n, 2, 1).unwrap();
+        lif.init_state(&mut state);
+        let mut out = SpikeVec::new(n);
+
+        // Kick every neuron for a few steps, then go silent.
+        let kick = SpikeVec::from_indices((0..n as u32).collect(), n).unwrap();
+        let quiet = SpikeVec::new(n);
+        for _ in 0..30 {
+            layer.step(&mut state, &kick, &mut out).unwrap();
+        }
+        let mut fired_after_kick = 0usize;
+        let mut fired_late = 0usize;
+        for t in 0..100 {
+            layer.step(&mut state, &quiet, &mut out).unwrap();
+            fired_after_kick += out.count();
+            if t >= 70 {
+                fired_late += out.count();
+            }
+        }
+        assert!(
+            fired_after_kick > 10,
+            "self-excitation died out ({fired_after_kick} spikes in 100 quiet steps)"
+        );
+        assert!(
+            fired_late > 0,
+            "self-excitation decayed away instead of persisting (no spikes in the last 30 steps)"
+        );
+
+        // Full reset: silent thereafter.
+        state.fill(0.0);
+        layer.reset_recurrent();
+        for _ in 0..50 {
+            layer.step(&mut state, &quiet, &mut out).unwrap();
+            assert!(out.is_empty(), "layer fired after a full reset");
+        }
+    }
+
+    #[test]
+    fn zero_recurrence_matches_feedforward_exactly() {
+        let lif = Lif::new(LifParams {
+            dt: 0.5,
+            ..LifParams::default()
+        })
+        .unwrap();
+        let n = 5;
+        let mut ff = KoopmanLayer::lif(&lif, n, identity_w(n), 1).unwrap();
+        let mut rec = KoopmanLayer::lif(&lif, n, identity_w(n), 1)
+            .unwrap()
+            .with_recurrent(Mat::zeros(n, n))
+            .unwrap();
+        let mut s1 = LayerState::zeros(n, 2, 1).unwrap();
+        let mut s2 = LayerState::zeros(n, 2, 1).unwrap();
+        let mut o1 = SpikeVec::new(n);
+        let mut o2 = SpikeVec::new(n);
+        let drive = SpikeVec::from_indices(vec![0, 2], n).unwrap();
+        for t in 0..300 {
+            ff.step(&mut s1, &drive, &mut o1).unwrap();
+            rec.step(&mut s2, &drive, &mut o2).unwrap();
+            assert_eq!(o1.active(), o2.active(), "diverged at step {t}");
+        }
+    }
+
+    #[test]
+    fn recurrent_weight_dimensions_are_validated() {
+        let lif = Lif::new(LifParams::default()).unwrap();
+        let layer = KoopmanLayer::lif(&lif, 4, identity_w(4), 1).unwrap();
+        assert!(layer.with_recurrent(Mat::zeros(3, 4)).is_err());
     }
 
     #[test]

@@ -35,65 +35,77 @@ struct ExpConfig {
     n_pooled: usize,
     hidden: &'static [usize],
     minibatches: usize,
+    /// Zero-initialized recurrent connections within each hidden layer.
+    recurrent: bool,
+    /// Label-uniform minibatch sampling instead of sample-uniform.
+    balanced: bool,
+    /// Multiply the learning rate by `.1` at step `.0`.
+    lr_decay: Option<(usize, f64)>,
 }
+
+/// Round-1 defaults (A–I ran with these).
+const BASE: ExpConfig = ExpConfig {
+    tag: "",
+    name: "",
+    n_pooled: 100,
+    hidden: &[128],
+    minibatches: 1500,
+    recurrent: false,
+    balanced: false,
+    lr_decay: None,
+};
 
 const EXPERIMENTS: &[ExpConfig] = &[
     ExpConfig {
         tag: "A",
         name: "baseline 1x128",
-        n_pooled: 100,
-        hidden: &[128],
-        minibatches: 1500,
+        ..BASE
     },
     ExpConfig {
         tag: "B",
         name: "wide 1x256",
-        n_pooled: 100,
         hidden: &[256],
-        minibatches: 1500,
+        ..BASE
     },
     ExpConfig {
         tag: "C",
         name: "wide 1x512",
-        n_pooled: 100,
         hidden: &[512],
-        minibatches: 1500,
+        ..BASE
     },
     ExpConfig {
         tag: "D",
         name: "deep 256-128",
-        n_pooled: 100,
         hidden: &[256, 128],
-        minibatches: 1500,
+        ..BASE
     },
     ExpConfig {
         tag: "E",
         name: "deep 128-128",
-        n_pooled: 100,
         hidden: &[128, 128],
-        minibatches: 1500,
+        ..BASE
     },
     ExpConfig {
         tag: "F",
         name: "fine channels 350, 1x256",
         n_pooled: 350,
         hidden: &[256],
-        minibatches: 1500,
+        ..BASE
     },
-    // Long-budget probes: run selectively after A-F pick a winner.
+    // Long-budget probes (round 1 follow-up).
     ExpConfig {
         tag: "G",
-        name: "long budget 1x256 (3000)",
-        n_pooled: 100,
+        name: "long 1x256 (3000)",
         hidden: &[256],
         minibatches: 3000,
+        ..BASE
     },
     ExpConfig {
         tag: "H",
-        name: "long budget 1x512 (3000)",
-        n_pooled: 100,
+        name: "long 1x512 (3000)",
         hidden: &[512],
         minibatches: 3000,
+        ..BASE
     },
     ExpConfig {
         tag: "I",
@@ -101,6 +113,62 @@ const EXPERIMENTS: &[ExpConfig] = &[
         n_pooled: 350,
         hidden: &[256],
         minibatches: 3000,
+        ..BASE
+    },
+    // Round 2: the untried next steps from demo/RESULTS.md.
+    ExpConfig {
+        tag: "J",
+        name: "no pooling: 700ch, 1x256 (3000)",
+        n_pooled: 700,
+        hidden: &[256],
+        minibatches: 3000,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "K",
+        name: "longer on winner: 350ch, 1x256 (6000)",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 6000,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "L",
+        name: "RECURRENT 350ch, 1x256 (3000), W_rec zero-init",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 3000,
+        recurrent: true,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "M",
+        name: "balanced minibatches: 350ch, 1x256 (3000)",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 3000,
+        balanced: true,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "N",
+        name: "lr decay x0.3 @2000: 350ch, 1x256 (3000)",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 3000,
+        lr_decay: Some((2000, 0.3)),
+        ..BASE
+    },
+    // Round-2 combo: assembled from the winners of J..N.
+    ExpConfig {
+        tag: "O",
+        name: "combo: recurrent 350ch 1x256, 6000, lr decay @4000",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 6000,
+        recurrent: true,
+        lr_decay: Some((4000, 0.3)),
+        ..BASE
     },
 ];
 
@@ -143,7 +211,13 @@ fn build_network(cfg: &ExpConfig) -> Network {
         let numerator = if l == 0 { 35.0 } else { 90.0 };
         let gain = numerator / fan_in as f64;
         let w = Mat::from_fn(n, fan_in, |_, _| rng.random_range(0.0..gain));
-        layers.push(KoopmanLayer::lif(&lif, n, w, BATCH).unwrap());
+        let mut layer = KoopmanLayer::lif(&lif, n, w, BATCH).unwrap();
+        if cfg.recurrent {
+            // Zero-init: exactly feedforward at step 0; training grows the
+            // recurrence from nothing (clean attribution).
+            layer = layer.with_recurrent(Mat::zeros(n, n)).unwrap();
+        }
+        layers.push(layer);
         fan_in = n;
     }
     Network::new(layers, BATCH).unwrap()
@@ -166,14 +240,32 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
     let mut trainer = Trainer::new(&net, N_CLASSES, TrainConfig::default()).unwrap();
     let mut data_rng = StdRng::seed_from_u64(DATA_SEED);
 
+    // Per-class index for the balanced-sampling variation.
+    let mut by_class: Vec<Vec<usize>> = vec![Vec::new(); N_CLASSES];
+    for (i, s) in train.iter().enumerate() {
+        by_class[s.label].push(i);
+    }
+
     let start = Instant::now();
     let mut loss_curve = Vec::new();
     let mut recent = Vec::new();
     for step in 0..cfg.minibatches {
+        if let Some((at, factor)) = cfg.lr_decay {
+            if step == at {
+                trainer.set_learning_rate(5e-3 * factor);
+                println!("  step {step:4}: learning rate → {:.1e}", 5e-3 * factor);
+            }
+        }
         let mut inputs = zero_inputs(cfg.n_pooled);
         let mut targets = Vec::with_capacity(BATCH);
         for b in 0..BATCH {
-            let sample = &train[data_rng.random_range(0..train.len())];
+            let sample = if cfg.balanced {
+                let class = data_rng.random_range(0..N_CLASSES);
+                let list = &by_class[class];
+                &train[list[data_rng.random_range(0..list.len())]]
+            } else {
+                &train[data_rng.random_range(0..train.len())]
+            };
             targets.push(sample.label);
             write_sample(sample, &mut inputs, b, cfg.n_pooled).unwrap();
         }
