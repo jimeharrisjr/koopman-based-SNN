@@ -196,11 +196,43 @@ event dropout, ±25-channel spectral shift, ±10 % time stretch). Raw logs:
 readout, and 75 minutes of single-thread laptop training at 0.877 is at the
 upper end of the recurrent band.
 
-## Remaining next steps (untried)
+## Round 4 — adaptive neurons, heterogeneity, depth, budget (base: R recipe)
 
-Two recurrent layers under the full recipe; τ-heterogeneity / adaptive
-neurons (the published ~0.90+ results use them); temporal readouts
-(max-over-time or low-pass instead of spike counts); longer augmented
-budgets (R's and T's losses were still drifting down); and multi-seed
-repeats to put error bars on the small margins (R vs T is within plausible
-seed noise).
+New library support this round (all exactness-gated): generalized
+spike-triggered jumps (the subtractive reset became `jumps[0]`; adaptation is
+one more linear jump), `KoopmanLayer::adlif` (k = 3, spike-for-spike against
+the AdLif reference), and `adlif_hetero` (per-neuron time constants via
+`Operator::PerNeuron` + per-neuron coupling, each neuron exact against its
+own reference). Raw logs: `sweep-U-log.txt` … `sweep-X-log.txt`.
+
+| tag | on top of R (recurrent 350 ch 1 × 256, aug, 6000; 0.873) | **test acc** | final loss | train time |
+|---|---|---|---|---|
+| **X** | **two recurrent layers 256-256** | **0.886** | 0.213 | 53 min |
+| W | ALIF, heterogeneous τ (τ_m 10–40, τ_w 60–400 ms) | 0.864 | 0.203 | 26 min |
+| U | 12000 minibatches | 0.858 | 0.126 | 49 min |
+| V | ALIF, homogeneous (τ_w 150 ms, b 0.1) | 0.836 | 0.216 | 26 min |
+
+### Round-4 findings
+
+- **Depth pays once the recipe supports it: 0.886, the new best.** The same
+  two-layer idea that was cost-neutral (D) or harmful (E) for feedforward
+  unaugmented nets in round 1 gains +1.3 points over one layer under
+  recurrence + augmentation. Each round's "loser" keeps becoming a later
+  round's winner once its enabling ingredient arrives (512 width → round 3;
+  depth → here).
+- **Adaptation *lost* accuracy at this configuration** — a useful negative.
+  Homogeneous ALIF dropped 3.7 points below plain LIF; per-neuron
+  heterogeneous τ recovered most but stayed 0.9 below. The published ALIF
+  wins on SHD come with finer time resolution, learned τ, and different
+  readouts; adaptation is not a free upgrade at 10 ms bins with a count
+  readout. (τ/b_jump were fixed, not tuned — a fair caveat.)
+- **The budget ceiling is real and augmentation only moved it once**: 12000
+  minibatches overfit (train loss 0.13) just like 6000 did without
+  augmentation. More augmentation variety, not more epochs, is the lever.
+
+Cumulative journey: **0.502 → 0.680 → 0.808 → 0.877 → 0.886.**
+
+## Remaining next steps (in flight: round 5, target > 0.92)
+
+Full 1.4 s duration; 5 ms bins; leaky-trace temporal readout; 512 width
+under aug-only; combos; multi-seed error bars; logit-ensembles.

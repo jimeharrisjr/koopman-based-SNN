@@ -44,6 +44,17 @@ pub struct KoopmanLayer {
     b_local: Vec<f64>,
     /// Firing threshold (subtractive reset subtracts exactly this).
     theta: f64,
+    /// Spike-triggered jumps per state variable: on a spike, variable `p` of
+    /// the firing neuron gets `jumps[p]` added. `[−θ, 0]` is the plain LIF
+    /// subtractive reset; `[−θ, 0, b_jump]` adds adaptive-LIF adaptation.
+    /// Linear in the spike indicator, so the step stays exactly
+    /// `x_{t+1} = A·x_t + B·u_t`.
+    jumps: Vec<f64>,
+    /// Per-neuron input coupling override (`k × N`): entry `(p, j)` scales
+    /// the drive into variable `p` of neuron `j`. `None` broadcasts
+    /// `b_local` uniformly (the homogeneous case). Heterogeneous-τ layers
+    /// need this because δ and 1−β differ per neuron.
+    coupling_override: Option<Mat<f64>>,
     n_neurons: usize,
     n_state_vars: usize,
     /// Optional recurrent weights (`n_neurons × n_neurons`): the layer's own
@@ -127,10 +138,15 @@ impl KoopmanLayer {
         if batch == 0 {
             return Err(SnnError::InvalidParameter("batch must be nonzero".into()));
         }
+        // Default jumps: plain subtractive reset on the potential.
+        let mut jumps = vec![0.0; n_state_vars];
+        jumps[0] = -theta;
         Ok(Self {
             a,
             b_local,
             theta,
+            jumps,
+            coupling_override: None,
             n_neurons,
             n_state_vars,
             w_rec: None,
@@ -139,6 +155,42 @@ impl KoopmanLayer {
             drive: Mat::zeros(n_neurons, batch),
             w_in,
         })
+    }
+
+    /// Override the spike-triggered jumps (length k; `jumps[0]` must stay
+    /// `−θ` — the subtractive reset is not optional on the fast path).
+    pub fn with_jumps(mut self, jumps: Vec<f64>) -> Result<Self, SnnError> {
+        if jumps.len() != self.n_state_vars {
+            return Err(SnnError::DimensionMismatch(format!(
+                "{} jump entries for {} state variables",
+                jumps.len(),
+                self.n_state_vars
+            )));
+        }
+        if jumps[0] != -self.theta {
+            return Err(SnnError::InvalidParameter(format!(
+                "jumps[0] must equal −θ = {} (got {})",
+                -self.theta, jumps[0]
+            )));
+        }
+        self.jumps = jumps;
+        Ok(self)
+    }
+
+    /// Per-neuron input-coupling override (`k × N`), for heterogeneous
+    /// layers where δ and 1−β differ per neuron.
+    pub fn with_coupling(mut self, coupling: Mat<f64>) -> Result<Self, SnnError> {
+        if coupling.nrows() != self.n_state_vars || coupling.ncols() != self.n_neurons {
+            return Err(SnnError::DimensionMismatch(format!(
+                "coupling is {}×{}, expected {}×{}",
+                coupling.nrows(),
+                coupling.ncols(),
+                self.n_state_vars,
+                self.n_neurons
+            )));
+        }
+        self.coupling_override = Some(coupling);
+        Ok(self)
     }
 
     /// Add recurrent connections: the layer's own previous-step spikes feed
@@ -215,6 +267,88 @@ impl KoopmanLayer {
         Self::new(a, w_in, lif.b_local().to_vec(), lif.params().theta, batch)
     }
 
+    /// The exact-linear **adaptive** LIF layer (k = 3: potential, synaptic
+    /// current, adaptation). The spike-triggered adaptation increment is one
+    /// more linear jump (`[−θ, 0, b_jump]`), so identification and training
+    /// exactness carry over unchanged. Same v_rest/reset requirements as
+    /// [`lif`](Self::lif).
+    pub fn adlif(
+        adlif: &crate::neuron::AdLif,
+        n_neurons: usize,
+        w_in: Mat<f64>,
+        batch: usize,
+    ) -> Result<Self, SnnError> {
+        let p = adlif.params();
+        if p.v_rest != 0.0 {
+            return Err(SnnError::InvalidParameter(format!(
+                "KoopmanLayer::adlif requires v_rest = 0 (got {})",
+                p.v_rest
+            )));
+        }
+        if !matches!(p.reset, crate::neuron::ResetMode::Subtractive) {
+            return Err(SnnError::InvalidParameter(
+                "the fast path supports subtractive reset only (Q5)".into(),
+            ));
+        }
+        let theta = p.theta;
+        let b_jump = p.b_jump;
+        let a = Operator::PerVariable {
+            a_local: adlif.a_local(),
+            n_neurons,
+        };
+        Self::new(a, w_in, adlif.b_local().to_vec(), theta, batch)?
+            .with_jumps(vec![-theta, 0.0, b_jump])
+    }
+
+    /// Heterogeneous adaptive-LIF layer: per-neuron time constants (one
+    /// [`AdLif`](crate::neuron::AdLif) per neuron) with shared threshold and
+    /// adaptation increment. Uses [`Operator::PerNeuron`] blocks plus a
+    /// per-neuron coupling override.
+    pub fn adlif_hetero(
+        neurons: &[crate::neuron::AdLif],
+        w_in: Mat<f64>,
+        batch: usize,
+    ) -> Result<Self, SnnError> {
+        let n = neurons.len();
+        if n == 0 {
+            return Err(SnnError::InvalidParameter("no neurons given".into()));
+        }
+        let theta = neurons[0].params().theta;
+        let b_jump = neurons[0].params().b_jump;
+        let mut blocks = Mat::<f64>::zeros(9, n);
+        let mut coupling = Mat::<f64>::zeros(3, n);
+        for (j, cell) in neurons.iter().enumerate() {
+            let p = cell.params();
+            if p.v_rest != 0.0
+                || !matches!(p.reset, crate::neuron::ResetMode::Subtractive)
+                || p.theta != theta
+                || p.b_jump != b_jump
+            {
+                return Err(SnnError::InvalidParameter(format!(
+                    "neuron {j}: heterogeneous layers vary time constants only \
+                     (v_rest = 0, subtractive reset, shared θ and b_jump)"
+                )));
+            }
+            let a_local = cell.a_local();
+            for p_row in 0..3 {
+                for q in 0..3 {
+                    blocks[(p_row * 3 + q, j)] = a_local[(p_row, q)];
+                }
+            }
+            let b = cell.b_local();
+            for (p_row, &c) in b.iter().enumerate() {
+                coupling[(p_row, j)] = c;
+            }
+        }
+        let a = Operator::PerNeuron {
+            blocks,
+            n_state_vars: 3,
+        };
+        Self::new(a, w_in, vec![0.0; 3], theta, batch)?
+            .with_coupling(coupling)?
+            .with_jumps(vec![-theta, 0.0, b_jump])
+    }
+
     pub fn n_neurons(&self) -> usize {
         self.n_neurons
     }
@@ -240,9 +374,29 @@ impl KoopmanLayer {
         &mut self.w_in
     }
 
-    /// Input-coupling coefficients per state variable.
+    /// Input-coupling coefficients per state variable (uniform case; a
+    /// heterogeneous layer's effective coupling is [`coupling_override`]).
     pub fn b_local(&self) -> &[f64] {
         &self.b_local
+    }
+
+    /// Per-neuron coupling override, if set.
+    pub fn coupling_override(&self) -> Option<&Mat<f64>> {
+        self.coupling_override.as_ref()
+    }
+
+    /// Effective drive coupling into variable `p` of neuron `j`.
+    #[inline]
+    pub fn coupling(&self, p: usize, j: usize) -> f64 {
+        match &self.coupling_override {
+            Some(c) => c[(p, j)],
+            None => self.b_local[p],
+        }
+    }
+
+    /// Spike-triggered jumps per state variable (`jumps[0] = −θ`).
+    pub fn jumps(&self) -> &[f64] {
+        &self.jumps
     }
 
     /// Firing threshold.
@@ -313,20 +467,36 @@ impl KoopmanLayer {
 
         // 2. Linear advance plus input coupling.
         self.a.apply(state.as_mat(), self.y.as_mut(), false);
-        for (p, &coef) in self.b_local.iter().enumerate() {
-            if coef == 0.0 {
-                continue;
+        match &self.coupling_override {
+            None => {
+                for (p, &coef) in self.b_local.iter().enumerate() {
+                    if coef == 0.0 {
+                        continue;
+                    }
+                    for j in 0..n {
+                        self.y[(p * n + j, 0)] += coef * self.drive[(j, 0)];
+                    }
+                }
             }
-            for j in 0..n {
-                self.y[(p * n + j, 0)] += coef * self.drive[(j, 0)];
+            Some(c) => {
+                for p in 0..self.n_state_vars {
+                    for j in 0..n {
+                        self.y[(p * n + j, 0)] += c[(p, j)] * self.drive[(j, 0)];
+                    }
+                }
             }
         }
 
-        // 3 + 4. Threshold on the potential block, subtractive reset.
+        // 3 + 4. Threshold on the potential block; spike-triggered jumps
+        // (subtractive reset on v, adaptation increments, …).
         out.clear();
         for j in 0..n {
             if self.y[(j, 0)] >= self.theta {
-                self.y[(j, 0)] -= self.theta;
+                for (p, &jump) in self.jumps.iter().enumerate() {
+                    if jump != 0.0 {
+                        self.y[(p * n + j, 0)] += jump;
+                    }
+                }
                 out.push(j as u32);
             }
         }
@@ -441,13 +611,26 @@ impl KoopmanLayer {
 
         // 2. Advance + coupling.
         self.a.apply(state.as_mat(), self.y.as_mut(), false);
-        for (p, &coef) in self.b_local.iter().enumerate() {
-            if coef == 0.0 {
-                continue;
+        match &self.coupling_override {
+            None => {
+                for (p, &coef) in self.b_local.iter().enumerate() {
+                    if coef == 0.0 {
+                        continue;
+                    }
+                    for b in 0..batch {
+                        for j in 0..n {
+                            self.y[(p * n + j, b)] += coef * self.drive[(j, b)];
+                        }
+                    }
+                }
             }
-            for b in 0..batch {
-                for j in 0..n {
-                    self.y[(p * n + j, b)] += coef * self.drive[(j, b)];
+            Some(c) => {
+                for p in 0..self.n_state_vars {
+                    for b in 0..batch {
+                        for j in 0..n {
+                            self.y[(p * n + j, b)] += c[(p, j)] * self.drive[(j, b)];
+                        }
+                    }
                 }
             }
         }
@@ -461,12 +644,16 @@ impl KoopmanLayer {
             }
         }
 
-        // 3 + 4. Threshold + subtractive reset.
+        // 3 + 4. Threshold + spike-triggered jumps (reset, adaptation, …).
         for b in 0..batch {
             for j in 0..n {
                 let fired = self.y[(j, b)] >= self.theta;
                 if fired {
-                    self.y[(j, b)] -= self.theta;
+                    for (p, &jump) in self.jumps.iter().enumerate() {
+                        if jump != 0.0 {
+                            self.y[(p * n + j, b)] += jump;
+                        }
+                    }
                 }
                 out.as_mat_mut()[(j, b)] = if fired { 1.0 } else { 0.0 };
             }
@@ -560,6 +747,116 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn adlif_layer_matches_reference_simulator_spike_for_spike() {
+        use crate::neuron::{AdLif, AdLifParams};
+        let adlif = AdLif::new(AdLifParams {
+            dt: 0.5,
+            b_jump: 0.3,
+            ..AdLifParams::default()
+        })
+        .unwrap();
+        let n = 6;
+        let mut layer = KoopmanLayer::adlif(&adlif, n, identity_w(n), 1).unwrap();
+        let mut fast_state = LayerState::zeros(n, 3, 1).unwrap();
+        adlif.init_state(&mut fast_state);
+        let mut ref_state = LayerState::zeros(n, 3, 1).unwrap();
+        adlif.init_state(&mut ref_state);
+        let mut ref_spikes = SpikeBatch::zeros(n, 1).unwrap();
+        let mut out = SpikeVec::new(n);
+
+        for t in 0..800 {
+            // Drive neurons 0 and 3 (through identity W, gain 2).
+            let active: &[u32] = if t % 3 == 0 { &[0, 3] } else { &[0] };
+            let s_in = SpikeVec::from_indices(active.to_vec(), n).unwrap();
+            let mut drive = Mat::<f64>::zeros(n, 1);
+            for &j in active {
+                drive[(j as usize, 0)] += 2.0;
+            }
+            adlif.step(&mut ref_state, drive.as_ref(), &mut ref_spikes);
+            layer.step(&mut fast_state, &s_in, &mut out).unwrap();
+
+            let ref_active: Vec<u32> = (0..n as u32)
+                .filter(|&j| ref_spikes.as_mat()[(j as usize, 0)] == 1.0)
+                .collect();
+            assert_eq!(
+                out.active(),
+                ref_active.as_slice(),
+                "spikes diverged at {t}"
+            );
+            for i in 0..3 * n {
+                let a = fast_state.as_mat()[(i, 0)];
+                let b = ref_state.as_mat()[(i, 0)];
+                assert!(
+                    (a - b).abs() <= 1e-12 * b.abs().max(1.0),
+                    "state diverged at step {t}, row {i}: {a} vs {b}"
+                );
+            }
+        }
+        // Adaptation must actually have engaged.
+        assert!(fast_state.var(2)[(0, 0)] > 0.0, "adaptation never engaged");
+    }
+
+    #[test]
+    fn heterogeneous_adlif_layer_matches_per_neuron_references() {
+        use crate::neuron::{AdLif, AdLifParams};
+        // Three neurons with different time constants; the hetero layer must
+        // match each neuron's own reference simulator exactly.
+        let cells: Vec<AdLif> = [(10.0, 5.0, 80.0), (20.0, 8.0, 150.0), (30.0, 12.0, 250.0)]
+            .iter()
+            .map(|&(tau_m, tau_s, tau_w)| {
+                AdLif::new(AdLifParams {
+                    tau_m,
+                    tau_s,
+                    tau_w,
+                    dt: 0.5,
+                    b_jump: 0.2,
+                    ..AdLifParams::default()
+                })
+                .unwrap()
+            })
+            .collect();
+        let n = cells.len();
+        let mut layer = KoopmanLayer::adlif_hetero(&cells, identity_w(n), 1).unwrap();
+        let mut fast_state = LayerState::zeros(n, 3, 1).unwrap();
+        // Per-neuron single-cell references.
+        let mut ref_states: Vec<LayerState> = (0..n)
+            .map(|_| LayerState::zeros(1, 3, 1).unwrap())
+            .collect();
+        let mut ref_spikes = SpikeBatch::zeros(1, 1).unwrap();
+        let mut out = SpikeVec::new(n);
+
+        for t in 0..600 {
+            let s_in = SpikeVec::from_indices(vec![0, 1, 2], n).unwrap();
+            layer.step(&mut fast_state, &s_in, &mut out).unwrap();
+            for (j, cell) in cells.iter().enumerate() {
+                let mut drive = Mat::<f64>::zeros(1, 1);
+                drive[(0, 0)] = 2.0;
+                cell.step(&mut ref_states[j], drive.as_ref(), &mut ref_spikes);
+                for p in 0..3 {
+                    let a = fast_state.as_mat()[(p * n + j, 0)];
+                    let b = ref_states[j].as_mat()[(p, 0)];
+                    assert!(
+                        (a - b).abs() <= 1e-12 * b.abs().max(1.0),
+                        "neuron {j} var {p} diverged at step {t}: {a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hetero_constructor_rejects_mixed_thresholds() {
+        use crate::neuron::{AdLif, AdLifParams};
+        let a = AdLif::new(AdLifParams::default()).unwrap();
+        let b = AdLif::new(AdLifParams {
+            theta: 2.0,
+            ..AdLifParams::default()
+        })
+        .unwrap();
+        assert!(KoopmanLayer::adlif_hetero(&[a, b], identity_w(2), 1).is_err());
     }
 
     #[test]

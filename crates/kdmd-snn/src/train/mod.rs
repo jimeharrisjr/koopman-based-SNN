@@ -51,6 +51,11 @@ pub struct TrainConfig {
     /// (`W` and `W_rec`, not the readout) after each optimizer step:
     /// `w ← w · (1 − lr·λ)`. Zero disables it.
     pub weight_decay: f64,
+    /// Temporal readout: `Some(κ)` (κ < 1) replaces the plain spike count
+    /// with a leaky trace `trace_t = κ·trace_{t−1} + s_t`, weighting recent
+    /// spikes more — a readout memory of ≈ 1/(1−κ) steps. `None` keeps the
+    /// uniform count readout.
+    pub readout_decay: Option<f64>,
 }
 
 impl Default for TrainConfig {
@@ -65,6 +70,7 @@ impl Default for TrainConfig {
             },
             grad_clip: Some(1.0),
             weight_decay: 0.0,
+            readout_decay: None,
         }
     }
 }
@@ -170,15 +176,36 @@ impl Trainer {
                 .collect::<Result<_, _>>()?;
             net.step_batch_taped(input, &mut v_pre, &mut s_out)?;
             let top = s_out[n_layers - 1].as_mat();
-            for b in 0..batch {
-                for i in 0..n_out {
-                    counts[(i, b)] += top[(i, b)];
+            match self.cfg.readout_decay {
+                None => {
+                    for b in 0..batch {
+                        for i in 0..n_out {
+                            counts[(i, b)] += top[(i, b)];
+                        }
+                    }
+                }
+                // Leaky trace: trace ← κ·trace + s_t.
+                Some(kappa) => {
+                    for b in 0..batch {
+                        for i in 0..n_out {
+                            counts[(i, b)] = kappa * counts[(i, b)] + top[(i, b)];
+                        }
+                    }
                 }
             }
             v_pre_tape.push(v_pre);
             s_out_tape.push(s_out);
         }
         Ok((v_pre_tape, s_out_tape, counts))
+    }
+
+    /// Readout normalization: the effective mass of the (possibly leaky)
+    /// count over `t_steps` steps, so logits stay O(rate) regardless of κ.
+    fn readout_norm(&self, t_steps: usize) -> f64 {
+        match self.cfg.readout_decay {
+            None => t_steps as f64,
+            Some(kappa) => (1.0 - kappa.powi(t_steps as i32)) / (1.0 - kappa),
+        }
     }
 
     /// Softmax cross-entropy over logits; returns (mean loss, ∂L/∂logits,
@@ -244,7 +271,9 @@ impl Trainer {
         let n_layers = net.n_layers();
         let (v_pre_tape, s_out_tape, counts) = self.forward(net, inputs)?;
 
-        // logits = R · counts / T.
+        // logits = R · trace / norm (norm = T for the count readout, the
+        // leaky-trace mass otherwise).
+        let norm = self.readout_norm(t_steps);
         let n_out = counts.nrows();
         let classes = self.r.nrows();
         let mut logits = Mat::<f64>::zeros(classes, batch);
@@ -254,12 +283,12 @@ impl Trainer {
                 for j in 0..n_out {
                     acc += self.r[(i, j)] * counts[(j, b)];
                 }
-                logits[(i, b)] = acc / t_steps as f64;
+                logits[(i, b)] = acc / norm;
             }
         }
         let (loss, dlogits, accuracy) = Self::loss_and_grad(&logits, targets)?;
 
-        // ∂L/∂R = dlogits · countsᵀ / T.
+        // ∂L/∂R = dlogits · traceᵀ / norm.
         let mut grad_r = Mat::<f64>::zeros(classes, n_out);
         for i in 0..classes {
             for j in 0..n_out {
@@ -267,10 +296,12 @@ impl Trainer {
                 for b in 0..batch {
                     acc += dlogits[(i, b)] * counts[(j, b)];
                 }
-                grad_r[(i, j)] = acc / t_steps as f64;
+                grad_r[(i, j)] = acc / norm;
             }
         }
-        // ∂L/∂s_top (per step, same every step): Rᵀ · dlogits / T.
+        // ∂L/∂s_top base: Rᵀ · dlogits / norm. Under the leaky readout the
+        // per-step contribution is scaled by κ^(T−1−t) in the backward loop
+        // (∂trace_T/∂s_t); with the count readout the scale is 1 every step.
         let mut ds_top = Mat::<f64>::zeros(n_out, batch);
         for j in 0..n_out {
             for b in 0..batch {
@@ -278,7 +309,7 @@ impl Trainer {
                 for i in 0..classes {
                     acc += self.r[(i, j)] * dlogits[(i, b)];
                 }
-                ds_top[(j, b)] = acc / t_steps as f64;
+                ds_top[(j, b)] = acc / norm;
             }
         }
 
@@ -317,6 +348,8 @@ impl Trainer {
             })
             .collect();
 
+        // κ^(T−1−t) factor for the leaky readout (1.0 throughout for counts).
+        let mut readout_scale = 1.0f64;
         for t in (0..t_steps).rev() {
             // dldd currently holds step t+1's values (zero at t = T−1);
             // stash them for the recurrent path and overwrite dldd below.
@@ -330,7 +363,7 @@ impl Trainer {
                 if l == n_layers - 1 {
                     for b in 0..batch {
                         for j in 0..n {
-                            g_s[(j, b)] += ds_top[(j, b)];
+                            g_s[(j, b)] += readout_scale * ds_top[(j, b)];
                         }
                     }
                 }
@@ -362,10 +395,17 @@ impl Trainer {
                         }
                     }
                 }
-                // Reset path: x_{t+1,v} = y_v − θ·s.
-                for b in 0..batch {
-                    for j in 0..n {
-                        g_s[(j, b)] -= theta * lambda[l][(j, b)];
+                // Spike-jump paths: x_{t+1,p} += jumps[p]·s (subtractive
+                // reset on v, adaptation increment on w, …).
+                let jumps: Vec<f64> = net.layer(l).jumps().to_vec();
+                for (p, &jump) in jumps.iter().enumerate() {
+                    if jump == 0.0 {
+                        continue;
+                    }
+                    for b in 0..batch {
+                        for j in 0..n {
+                            g_s[(j, b)] += jump * lambda[l][(p * n + j, b)];
+                        }
                     }
                 }
                 // Surrogate through the threshold; ∂L/∂y.
@@ -382,13 +422,13 @@ impl Trainer {
                         }
                     }
                 }
-                // ∂L/∂d = Σ_p b_local[p] · ∂L/∂y_p ; accumulate ∂L/∂W.
-                let b_local: Vec<f64> = net.layer(l).b_local().to_vec();
+                // ∂L/∂d = Σ_p coupling(p, j) · ∂L/∂y_p ; accumulate ∂L/∂W.
+                let layer_l = net.layer(l);
                 for b in 0..batch {
                     for j in 0..n {
                         let mut acc = 0.0;
-                        for (p, &coef) in b_local.iter().enumerate() {
-                            acc += coef * dldy[l][(p * n + j, b)];
+                        for p in 0..k {
+                            acc += layer_l.coupling(p, j) * dldy[l][(p * n + j, b)];
                         }
                         dldd[l][(j, b)] = acc;
                     }
@@ -432,6 +472,9 @@ impl Trainer {
                     lambda[l].as_mut(),
                     false,
                 );
+            }
+            if let Some(kappa) = self.cfg.readout_decay {
+                readout_scale *= kappa;
             }
         }
 
@@ -494,26 +537,39 @@ impl Trainer {
         net: &mut Network,
         inputs: &[SpikeBatch],
     ) -> Result<Vec<usize>, SnnError> {
-        let (_, _, counts) = self.forward(net, inputs)?;
-        let batch = counts.ncols();
-        let classes = self.r.nrows();
+        let logits = self.logits(net, inputs)?;
+        let (classes, batch) = (logits.nrows(), logits.ncols());
         let mut out = Vec::with_capacity(batch);
         for b in 0..batch {
             let mut best = 0usize;
-            let mut best_v = f64::MIN;
-            for i in 0..classes {
-                let mut acc = 0.0;
-                for j in 0..counts.nrows() {
-                    acc += self.r[(i, j)] * counts[(j, b)];
-                }
-                if acc > best_v {
-                    best_v = acc;
+            for i in 1..classes {
+                if logits[(i, b)] > logits[(best, b)] {
                     best = i;
                 }
             }
             out.push(best);
         }
         Ok(out)
+    }
+
+    /// Readout logits (`n_classes × batch`) for a batch — forward pass only.
+    /// Lets callers combine models (ensembling) or inspect confidence.
+    pub fn logits(&self, net: &mut Network, inputs: &[SpikeBatch]) -> Result<Mat<f64>, SnnError> {
+        let (_, _, counts) = self.forward(net, inputs)?;
+        let norm = self.readout_norm(inputs.len());
+        let batch = counts.ncols();
+        let classes = self.r.nrows();
+        let mut logits = Mat::<f64>::zeros(classes, batch);
+        for b in 0..batch {
+            for i in 0..classes {
+                let mut acc = 0.0;
+                for j in 0..counts.nrows() {
+                    acc += self.r[(i, j)] * counts[(j, b)];
+                }
+                logits[(i, b)] = acc / norm;
+            }
+        }
+        Ok(logits)
     }
 
     /// Finite-difference check of the READOUT gradient (the smooth part of
@@ -540,7 +596,7 @@ impl Trainer {
                     for j in 0..n_out {
                         acc += r[(i, j)] * counts[(j, b)];
                     }
-                    logits[(i, b)] = acc / t_steps as f64;
+                    logits[(i, b)] = acc / self.readout_norm(t_steps);
                 }
             }
             logits
@@ -554,7 +610,7 @@ impl Trainer {
                 for b in 0..counts.ncols() {
                     acc += dlogits[(i, b)] * counts[(j, b)];
                 }
-                grad_r[(i, j)] = acc / t_steps as f64;
+                grad_r[(i, j)] = acc / self.readout_norm(t_steps);
             }
         }
         // Central finite differences, worst relative error over entries with

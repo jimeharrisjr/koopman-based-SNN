@@ -169,6 +169,44 @@ fn recurrent_bptt_reduces_loss_and_grows_recurrence_from_zero() {
 }
 
 #[test]
+fn leaky_readout_learns_the_task_and_gradient_stays_fd_exact() {
+    // The κ-trace readout must train comparably to the count readout, and
+    // its readout gradient (the smooth part) must stay finite-difference
+    // exact under the changed normalization and per-step scaling.
+    let mut rng = StdRng::seed_from_u64(53);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let cfg = TrainConfig {
+        readout_decay: Some(0.95),
+        ..TrainConfig::default()
+    };
+    let mut net = build_net(6);
+    let trainer_probe = Trainer::new(&net, N_CLASSES, cfg.clone()).unwrap();
+    let (inputs, targets) = minibatch(&task, &mut rng);
+    let worst = trainer_probe
+        .check_readout_gradient(&mut net, &inputs, &targets, 1e-6)
+        .unwrap();
+    assert!(
+        worst < 1e-5,
+        "leaky-readout gradient mismatch vs finite differences: {worst:.2e}"
+    );
+
+    let mut trainer = Trainer::new(&net, N_CLASSES, cfg).unwrap();
+    let mut losses = Vec::new();
+    for step in 0..200 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.6 * early,
+        "leaky-readout training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+}
+
+#[test]
 fn weight_decay_shrinks_weights_under_silent_input() {
     // With no input spikes the network is silent, gradients are ~0, and
     // decoupled decay must shrink the layer weights geometrically.
