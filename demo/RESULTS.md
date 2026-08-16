@@ -232,7 +232,102 @@ own reference). Raw logs: `sweep-U-log.txt` … `sweep-X-log.txt`.
 
 Cumulative journey: **0.502 → 0.680 → 0.808 → 0.877 → 0.886.**
 
-## Remaining next steps (in flight: round 5, target > 0.92)
+## Round 5 — the remaining next steps (target: > 0.92) — **target not reached**
 
-Full 1.4 s duration; 5 ms bins; leaky-trace temporal readout; 512 width
-under aug-only; combos; multi-seed error bars; logit-ensembles.
+New library support this round: leaky-trace readout
+(`TrainConfig::readout_decay`: spike counts become an exponentially
+decaying trace, with the matching per-step gradient scaling) and a public
+`Trainer::logits` for logit-level ensembling in the harness. Raw logs:
+`sweep-Z-log.txt`, `sweep-AA…AE-log.txt`, `sweep-AF-ensemble-log.txt`
+(note: `sweep-AF-log.txt` is round 1's A–F log; the ensemble's tag is
+also AF, hence the distinct filename).
+
+### First: the seed-noise audit that reframes everything
+
+Z1/Z2 re-ran the *identical* R recipe (recurrent 1 × 256, aug, 6000)
+with only the weight-init seed changed:
+
+| run | seed | test acc |
+|---|---|---|
+| R (round 3) | 42 | 0.873 |
+| Z1 | 43 | 0.819 |
+| Z2 | 44 | 0.858 |
+
+**The same configuration spans 0.819–0.873 across three seeds: mean
+≈ 0.850, spread ± 2.7 points.** R's 0.873 was a lucky draw, not the
+recipe's true value. Every single-seed margin smaller than ~3 points in
+rounds 1–4 (T vs R, X vs T, W vs V…) is individually inconclusive; the
+axis-level conclusions stand only where effects were large (recurrence
++12.8, augmentation×budget +9.6) or replicated across configurations.
+
+### The round-5 runs
+
+| tag | variation | **test acc** | vs R-recipe mean 0.850 | train time |
+|---|---|---|---|---|
+| **AF** | **ensemble ×3 of X (two recurrent layers 256-256), summed logits** | **0.882** | **+3.2 (variance-reduced)** | 148 min |
+| AB | 5 ms bins (200 steps), R recipe | 0.871 | +2.1 (single seed, 2× cost) | 44 min |
+| AA | full 1.4 s duration (140 bins) | 0.850 | ±0 | 33 min |
+| AD | 1 × 512, aug only (no wd), 6000 | 0.850 | ±0 | 79 min |
+| AE | three recurrent layers 256-256-256 | 0.830 | −2.0 | 80 min |
+| AC | leaky-trace readout (κ = 0.95) | 0.709 | **−14.1** | 26 min |
+
+### Round-5 findings
+
+- **The ensemble is the best honest number: 0.882.** Three members of
+  the two-layer recipe (different init seeds), logits summed at eval.
+  It matches X's single-seed 0.886 while averaging out the seed lottery
+  — evidence that X's depth gain was real, but also that ensembling
+  three ~0.85–0.88 members buys robustness, not a leap: the members'
+  errors are too correlated (same architecture, same data) for voting
+  to add much beyond the best draw.
+- **Depth stops at two layers**: a third recurrent layer *lost* ~2
+  points at 1.5× the two-layer cost (AE, 0.830). Consistent with
+  rounds 1/4: each depth increment needs a new enabling ingredient,
+  and whatever the third layer needs (per-layer lr, skip connections,
+  normalization), this uniform recipe doesn't have it.
+- **The count readout is load-bearing** — the round's most decisive
+  negative: recency-weighting the readout (κ = 0.95, ~14-bin memory)
+  collapsed accuracy to 0.709. SHD words are distinguished by evidence
+  spread over the whole utterance; discarding early evidence costs 14
+  points. Any temporal-readout scheme here must *add* memory, not
+  replace the integral.
+- **Duration and bin width are already right**: the full 1.4 s (AA,
+  0.850 — trailing silence dilutes nothing but adds nothing) and 5 ms
+  bins (AB, 0.871 at 2× cost) both land within seed noise of the 1 s /
+  10 ms default. AD (0.850) closes the round-3 loose end: at 512 width,
+  weight decay's apparent +2.7 (T) was within seed noise all along.
+
+### Verdict on the 0.92 target
+
+**Not reached: best variance-reduced result 0.882 (AF), best single
+draw 0.886 (X).** Every accessible axis is now measured: input
+resolution, duration, bin width, width, depth, budget, recurrence,
+augmentation, weight decay, adaptation, heterogeneity, readout shape,
+seeds, ensembling — each is either exhausted or negative. The published
+runs that clear 0.90–0.94 on SHD rely on ingredients outside this
+library's current training path: *learned* per-neuron time constants,
+attention/state-space hybrid readouts, much heavier augmentation
+pipelines, or larger ensembles of more diverse models. Closing the
+remaining ~3.5 points is a library-feature project (most plausibly
+learnable τ — backprop through the propagator entries — plus a
+trained temporal-attention readout), not a sweep away.
+
+### Final cumulative journey
+
+| stage | configuration | test acc |
+|---|---|---|
+| original demo | 100 ch, 1 × 128, 600 mb | 0.502 |
+| round 1 (I) | 350 ch, 1 × 256, 3000 mb | 0.680 |
+| round 2 (L) | + recurrent hidden layer | 0.808 |
+| round 3 (R/T) | + augmentation (× budget) | 0.873* |
+| round 4 (X) | + second recurrent layer | 0.886* |
+| **round 5 (AF)** | **ensemble ×3 of X recipe** | **0.882 (variance-reduced)** |
+
+\* single seed; the Z audit puts ± 2.7 points on any single-seed number.
+
+**+38 points over the campaign, ending at the top of the published
+recurrent-SNN band (~0.71–0.83+) but short of the augmented/adaptive
+state-of-the-art band (~0.90+).** The honest headline: a subtractive-reset
+LIF network with exact linear sub-threshold dynamics, hand-rolled BPTT,
+and a count readout reaches **0.88 ± noise** on SHD with ~2.5 h of
+single-thread laptop training.

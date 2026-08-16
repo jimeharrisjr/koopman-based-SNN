@@ -92,3 +92,29 @@ output: `sweep-AF-log.txt`, `sweep-GI-log.txt`. Headline outcomes:
   width.
 - Cumulative across three rounds: **0.502 → 0.680 → 0.808 → 0.877**, the
   upper end of the published recurrent-SNN band for SHD.
+
+### Round 4 (tags U–X): adaptation, heterogeneity, depth, budget
+
+- **New best: 0.886** — two recurrent layers 256-256 on the round-3
+  recipe. Depth, harmful in round 1, pays once recurrence + augmentation
+  support it (+1.3 over one layer).
+- **Adaptive (ALIF) neurons lost accuracy** at 10 ms bins with a count
+  readout (homogeneous −3.7; per-neuron heterogeneous τ recovered most
+  but stayed −0.9) — the published ALIF wins need learned τ and finer
+  time resolution. Doubling budget to 12000 overfit again.
+
+### Round 5 (tags Z, AA–AF): the remaining steps, target > 0.92 — not reached
+
+- **Seed audit first**: re-running the round-3 recipe under two new init
+  seeds spanned 0.819–0.873 (± 2.7 points). Single-seed margins under ~3
+  points anywhere in this study are inconclusive; the big axis effects
+  (recurrence, augmentation×budget, depth-to-two-layers) survive.
+- **Best honest result: 0.882** — a 3-member logit ensemble of the
+  two-layer recipe (variance-reduced; matches X's lucky-ish 0.886).
+- **Negatives that close the search**: a third recurrent layer −2;
+  recency-weighted (leaky) readout −14 (the count integral over the whole
+  word is load-bearing); full 1.4 s duration, 5 ms bins, and aug-only 512
+  all within seed noise of the default.
+- **Final: 0.502 → 0.88 ± noise.** The remaining gap to 0.92+ needs
+  library features (learned time constants, temporal-attention readouts),
+  not more sweeping — see RESULTS.md for the full argument.

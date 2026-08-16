@@ -383,24 +383,25 @@ const EXPERIMENTS: &[ExpConfig] = &[
         augment: true,
         ..BASE
     },
-    // AE: combo of the round-5 winners (edited once AA..AD report).
+    // AE: deeper — three recurrent layers (depth was round 4's winner; the
+    // round-5 single-variation axes AA/AB/AC all came back neutral/negative).
     ExpConfig {
         tag: "AE",
-        name: "combo: winners of AA..AD",
+        name: "three recurrent layers 256-256-256, aug, 6000",
         n_pooled: 350,
-        hidden: &[256],
+        hidden: &[256, 256, 256],
         minibatches: 6000,
         recurrent: true,
         augment: true,
-        t_steps: 140,
         ..BASE
     },
-    // AF: 3-member logit-ensemble of the best single configuration.
+    // AF: 3-member logit-ensemble of the X recipe (two recurrent layers) —
+    // both an accuracy and a seed-variance play (Z runs showed ±2.7).
     ExpConfig {
         tag: "AF",
-        name: "ensemble x3 of the best single config",
+        name: "ensemble x3 of two recurrent layers 256-256",
         n_pooled: 350,
-        hidden: &[256],
+        hidden: &[256, 256],
         minibatches: 6000,
         recurrent: true,
         augment: true,
