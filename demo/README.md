@@ -78,3 +78,17 @@ output: `sweep-AF-log.txt`, `sweep-GI-log.txt`. Headline outcomes:
   sides; unpooled 700-channel input reversed the resolution gains (0.664);
   balanced minibatches and lr decay did nothing at this scale.
 - Cumulative: **0.502 → 0.680 → 0.808** across the two rounds.
+
+### Round 3 (tags P–T): regularization + augmentation, target > 0.83
+
+- **Target exceeded: best 0.877** (recurrent 1 × 512, event-stream
+  augmentation + weight decay, 6000 minibatches); R (1 × 256, augmentation
+  only) hit 0.873 in a third of the training time and is the practical
+  sweet spot.
+- **The unlock is augmentation × budget, not either alone**: the same
+  6000-minibatch budget that overfit to 0.777 unaugmented reached 0.873
+  augmented (+9.6 points); augmentation at the short budget *hurt*
+  (underfitting), and weight decay was redundant-to-harmful except at 512
+  width.
+- Cumulative across three rounds: **0.502 → 0.680 → 0.808 → 0.877**, the
+  upper end of the published recurrent-SNN band for SHD.

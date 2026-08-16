@@ -169,6 +169,46 @@ fn recurrent_bptt_reduces_loss_and_grows_recurrence_from_zero() {
 }
 
 #[test]
+fn weight_decay_shrinks_weights_under_silent_input() {
+    // With no input spikes the network is silent, gradients are ~0, and
+    // decoupled decay must shrink the layer weights geometrically.
+    let mut net = build_net(41);
+    let mut trainer = Trainer::new(
+        &net,
+        N_CLASSES,
+        TrainConfig {
+            weight_decay: 10.0, // lr 5e-3 → shrink factor 0.95 per step
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+    let w_before = net.layer(0).weights().clone();
+    let silent: Vec<SpikeBatch> = (0..10)
+        .map(|_| SpikeBatch::zeros(N_IN, BATCH).unwrap())
+        .collect();
+    let targets = vec![0usize; BATCH];
+    for _ in 0..20 {
+        trainer.train_step(&mut net, &silent, &targets).unwrap();
+    }
+    let w_after = net.layer(0).weights();
+    let expected = 0.95f64.powi(20);
+    let mut checked = 0usize;
+    for j in 0..w_after.ncols() {
+        for i in 0..w_after.nrows() {
+            if w_before[(i, j)].abs() > 0.1 {
+                let ratio = w_after[(i, j)] / w_before[(i, j)];
+                assert!(
+                    (ratio - expected).abs() < 0.02,
+                    "weight ({i},{j}) shrank by {ratio:.4}, expected ≈ {expected:.4}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 100, "too few weights checked ({checked})");
+}
+
+#[test]
 fn mismatched_trainer_and_network_error_instead_of_panicking() {
     let lif = Lif::new(LifParams {
         dt: DT,

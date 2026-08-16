@@ -139,10 +139,68 @@ echo/reset, zero-recurrence ≡ feedforward exactness, gradient-flow-from-zero).
 +30.6 points total; ~11 minutes of single-thread laptop training for the
 final model.
 
+## Round 3 — regularization and augmentation (target: > 0.83)
+
+Additions this round: **decoupled (AdamW-style) weight decay** in the trainer
+(`TrainConfig::weight_decay`, applied to `W`/`W_rec` after the optimizer
+step; test-gated by exact geometric shrinkage under silent input) and
+**event-stream augmentation** in the harness (training data only: 15 %
+event dropout, ±25-channel spectral shift, ±10 % time stretch). Raw logs:
+`sweep-PQ-log.txt`, `sweep-RS-log.txt`, `sweep-T-log.txt`.
+
+| tag | on top of L (recurrent 350 ch 1 × 256 @3000, 0.808) | **test acc** | final loss | train time |
+|---|---|---|---|---|
+| **T** | **1 × 512 + aug + wd 0.01, 6000 mb** | **0.877** | 0.219 | 75.5 min |
+| R | + augmentation, 6000 mb | **0.873** | 0.243 | 24.3 min |
+| S | + aug + wd 0.01, 6000 mb | 0.843 | 0.231 | 22.8 min |
+| P | + wd 0.01 (3000 mb) | 0.778 | 0.185 | 11.8 min |
+| Q | + augmentation (3000 mb) | 0.777 | 0.381 | 12.2 min |
+
+**Target exceeded: three configurations clear 0.83, best 0.877.**
+
+### Round-3 findings
+
+**What worked:**
+
+- **Augmentation × budget is the unlock — neither alone.** The decisive
+  comparison: at 6000 minibatches the *unaugmented* recurrent net overfit
+  to 0.777 (round 2's O); the *augmented* one reached 0.873 (R). Same
+  model, same budget, +9.6 points — augmentation converts training budget
+  from memorization fuel into generalization. At the short 3000 budget,
+  augmentation alone (Q, 0.777) actually *hurt*: it makes the task harder,
+  and the run was still underfitted (loss 0.38 vs L's 0.18).
+- **Capacity follows regularization**: 512 neurons — which overfit pointlessly
+  back in round 1 — becomes the champion (T, 0.877) once augmentation and
+  decay control the fit. The margin over R is small (+0.4 points) for 3×
+  the training time; R is the practical sweet spot.
+
+**What didn't (or barely) worked:**
+
+- **Weight decay is redundant once augmentation is present at this scale**:
+  S (aug + wd) = 0.843 vs R (aug only) = 0.873 — the decay cost ~3 points
+  at 256 neurons. Only at 512 (T) did it net out positive. Decay alone (P,
+  0.778) slightly *reduced* accuracy vs plain L.
+
+### Cumulative journey
+
+| stage | configuration | test acc |
+|---|---|---|
+| original demo | 100 ch, 1 × 128, 600 mb | 0.502 |
+| round 1 (I) | 350 ch, 1 × 256, 3000 mb | 0.680 |
+| round 2 (L) | + recurrent hidden layer | 0.808 |
+| **round 3 (T)** | **+ augmentation + wd, 512 neurons, 6000 mb** | **0.877** |
+
++37.5 points total. For context, published SHD results: feedforward SNNs
+~0.48–0.71, recurrent SNNs ~0.71–0.83, augmented/adaptive state of the art
+~0.90+. A single recurrent LIF layer with subtractive reset, count-based
+readout, and 75 minutes of single-thread laptop training at 0.877 is at the
+upper end of the recurrent band.
+
 ## Remaining next steps (untried)
 
-Regularization to unlock the overtrained regimes (dropout-style spike
-masking, weight decay — nothing of the sort exists in the trainer yet),
-two recurrent layers, recurrent + 700 channels *with* regularization,
-τ-heterogeneity across neurons, and data augmentation (time-jitter/channel
-noise), which is how the published >0.83 results get there.
+Two recurrent layers under the full recipe; τ-heterogeneity / adaptive
+neurons (the published ~0.90+ results use them); temporal readouts
+(max-over-time or low-pass instead of spike counts); longer augmented
+budgets (R's and T's losses were still drifting down); and multi-seed
+repeats to put error bars on the small margins (R vs T is within plausible
+seed noise).

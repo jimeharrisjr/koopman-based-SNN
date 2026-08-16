@@ -47,6 +47,10 @@ pub struct TrainConfig {
     pub optim: OptimConfig,
     /// Elementwise gradient clip (absolute value), applied before the update.
     pub grad_clip: Option<f64>,
+    /// Decoupled (AdamW-style) weight decay applied to the layer weights
+    /// (`W` and `W_rec`, not the readout) after each optimizer step:
+    /// `w ← w · (1 − lr·λ)`. Zero disables it.
+    pub weight_decay: f64,
 }
 
 impl Default for TrainConfig {
@@ -60,6 +64,7 @@ impl Default for TrainConfig {
                 eps: 1e-8,
             },
             grad_clip: Some(1.0),
+            weight_decay: 0.0,
         }
     }
 }
@@ -451,6 +456,28 @@ impl Trainer {
             if let (Some(opt), Some(grad)) = (opt_slot.as_mut(), grad_slot.as_ref()) {
                 if let Some(w_rec) = net.layer_mut(l).recurrent_weights_mut() {
                     opt.update(w_rec, grad, &self.cfg.optim);
+                }
+            }
+        }
+        // Decoupled weight decay (AdamW-style), after the optimizer step.
+        if self.cfg.weight_decay > 0.0 {
+            let lr = match self.cfg.optim {
+                OptimConfig::Sgd { lr, .. } | OptimConfig::Adam { lr, .. } => lr,
+            };
+            let shrink = 1.0 - lr * self.cfg.weight_decay;
+            for l in 0..n_layers {
+                let w = net.layer_mut(l).weights_mut();
+                for c in 0..w.ncols() {
+                    for i in 0..w.nrows() {
+                        w[(i, c)] *= shrink;
+                    }
+                }
+                if let Some(wr) = net.layer_mut(l).recurrent_weights_mut() {
+                    for c in 0..wr.ncols() {
+                        for i in 0..wr.nrows() {
+                            wr[(i, c)] *= shrink;
+                        }
+                    }
                 }
             }
         }

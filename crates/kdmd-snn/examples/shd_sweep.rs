@@ -41,6 +41,11 @@ struct ExpConfig {
     balanced: bool,
     /// Multiply the learning rate by `.1` at step `.0`.
     lr_decay: Option<(usize, f64)>,
+    /// Train-time data augmentation (event dropout + channel shift + time
+    /// stretch on the raw event stream; test data is never augmented).
+    augment: bool,
+    /// Decoupled weight decay λ (0 disables).
+    weight_decay: f64,
 }
 
 /// Round-1 defaults (A–I ran with these).
@@ -53,7 +58,15 @@ const BASE: ExpConfig = ExpConfig {
     recurrent: false,
     balanced: false,
     lr_decay: None,
+    augment: false,
+    weight_decay: 0.0,
 };
+
+/// Augmentation strengths (fixed for the round; only presence/absence is
+/// varied). Applied to raw events before pooling/binning.
+const AUG_EVENT_DROP: f64 = 0.15;
+const AUG_CHANNEL_SHIFT: i32 = 25; // uniform in [−25, 25] of 700 channels
+const AUG_STRETCH: (f64, f64) = (0.9, 1.1); // uniform time-stretch factor
 
 const EXPERIMENTS: &[ExpConfig] = &[
     ExpConfig {
@@ -170,7 +183,88 @@ const EXPERIMENTS: &[ExpConfig] = &[
         lr_decay: Some((4000, 0.3)),
         ..BASE
     },
+    // Round 3: regularization and augmentation on the recurrent champion
+    // (L = recurrent 350ch 1x256 @3000, 0.808), targeting > 0.83.
+    ExpConfig {
+        tag: "P",
+        name: "L + weight decay 0.01",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 3000,
+        recurrent: true,
+        weight_decay: 0.01,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "Q",
+        name: "L + augmentation",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 3000,
+        recurrent: true,
+        augment: true,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "R",
+        name: "L + augmentation, 6000 (aug should unlock budget)",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "S",
+        name: "L + aug + wd 0.01, 6000",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        weight_decay: 0.01,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "T",
+        name: "capacity unlock: recurrent 1x512, aug + wd, 6000",
+        n_pooled: 350,
+        hidden: &[512],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        weight_decay: 0.01,
+        ..BASE
+    },
 ];
+
+/// Train-time augmentation on the raw event stream: per-event dropout, a
+/// whole-sample channel shift (spectral jitter), and a whole-sample time
+/// stretch. Events pushed outside [0, 700) channels are dropped; times
+/// outside the horizon are handled by binning's range check.
+fn augment_sample(sample: &ShdSample, rng: &mut StdRng) -> ShdSample {
+    let shift = rng.random_range(-AUG_CHANNEL_SHIFT..=AUG_CHANNEL_SHIFT);
+    let stretch = rng.random_range(AUG_STRETCH.0..AUG_STRETCH.1);
+    let mut times = Vec::with_capacity(sample.times_s.len());
+    let mut units = Vec::with_capacity(sample.units.len());
+    for (&t, &u) in sample.times_s.iter().zip(&sample.units) {
+        if rng.random::<f64>() < AUG_EVENT_DROP {
+            continue;
+        }
+        let shifted = u as i32 + shift;
+        if !(0..700).contains(&shifted) {
+            continue;
+        }
+        times.push(t * stretch);
+        units.push(shifted as u32);
+    }
+    ShdSample {
+        times_s: times,
+        units,
+        label: sample.label,
+    }
+}
 
 fn write_sample(
     sample: &ShdSample,
@@ -237,7 +331,15 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
         cfg.tag, cfg.name, cfg.n_pooled, cfg.hidden, cfg.minibatches
     );
     let mut net = build_network(cfg);
-    let mut trainer = Trainer::new(&net, N_CLASSES, TrainConfig::default()).unwrap();
+    let mut trainer = Trainer::new(
+        &net,
+        N_CLASSES,
+        TrainConfig {
+            weight_decay: cfg.weight_decay,
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
     let mut data_rng = StdRng::seed_from_u64(DATA_SEED);
 
     // Per-class index for the balanced-sampling variation.
@@ -267,7 +369,12 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
                 &train[data_rng.random_range(0..train.len())]
             };
             targets.push(sample.label);
-            write_sample(sample, &mut inputs, b, cfg.n_pooled).unwrap();
+            if cfg.augment {
+                let augmented = augment_sample(sample, &mut data_rng);
+                write_sample(&augmented, &mut inputs, b, cfg.n_pooled).unwrap();
+            } else {
+                write_sample(sample, &mut inputs, b, cfg.n_pooled).unwrap();
+            }
         }
         let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
         recent.push(stats.loss);
