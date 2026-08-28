@@ -22,7 +22,7 @@ failed. The result is a smaller, honest set:
 
 | Claim | Status |
 |---|---|
-| **Exact-linear fast engine** — LIF layers step through the closed-form propagator (`A_local ⊗ I_N`, O(N)); spike-for-spike agreement over 1000 steps is test-gated, and a single benchmark run measured 1.02× the reference simulator's cost (docs/09). adLIF shares the closed-form structure but has no fast-path integration test yet | ✅ shipped |
+| **Exact-linear fast engine** — LIF and adLIF layers step through the closed-form propagator (`A_local ⊗ I_N`, O(N)); spike-for-spike agreement is test-gated for both models on both the sparse and batched paths (LIF: 1000-step network equivalence; adLIF: 800-step reference + sparse/batch agreement, incl. heterogeneous per-neuron τ), and a single benchmark run measured 1.02× the reference simulator's cost (docs/09) | ✅ shipped |
 | **DMD/DMDc identification** — recovers the LIF propagator from data to ≤ 1e-8 (the permanent oracle test); known-B DMDc identifies A from *full spiking trajectories* with no masking | ✅ shipped |
 | **V1: reduced-order recurrent layers** — DMDc's rank-r output basis compresses a dense recurrent layer to O(N·r) stepping, within 10 % rollout RMSE in the sub-threshold (non-spiking) regime — the exact gate is `tests/reduced_order.rs`; spiking-regime reduction is future work | ✅ shipped |
 | **V3: spectral diagnostics** — identified operators come with spectrum, stability, per-mode timescales (via koopman-dmd's analysis suite, exercised by the identification gates) | ✅ shipped |

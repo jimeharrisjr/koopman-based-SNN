@@ -1086,6 +1086,53 @@ mod tests {
     }
 
     #[test]
+    fn adlif_sparse_and_batch_paths_agree() {
+        // The training path uses step_batch; the adLIF fast path must agree
+        // with its own sparse path spike-for-spike there too (closes the
+        // README claims-table gap; improvements.md P2.2).
+        use crate::neuron::{AdLif, AdLifParams};
+        let adlif = AdLif::new(AdLifParams {
+            dt: 0.5,
+            b_jump: 0.3,
+            ..AdLifParams::default()
+        })
+        .unwrap();
+        let n = 6;
+        let mut sparse_layer = KoopmanLayer::adlif(&adlif, n, identity_w(n), 1).unwrap();
+        let mut batch_layer = KoopmanLayer::adlif(&adlif, n, identity_w(n), 1).unwrap();
+        let mut s_state = LayerState::zeros(n, 3, 1).unwrap();
+        let mut b_state = LayerState::zeros(n, 3, 1).unwrap();
+        let mut out_sparse = SpikeVec::new(n);
+        let mut out_batch = SpikeBatch::zeros(n, 1).unwrap();
+        for t in 0..800 {
+            let active: &[u32] = if t % 3 == 0 { &[0, 3] } else { &[0] };
+            let s_in = SpikeVec::from_indices(active.to_vec(), n).unwrap();
+            let mut dense_in = SpikeBatch::zeros(n, 1).unwrap();
+            for &j in active {
+                dense_in.as_mat_mut()[(j as usize, 0)] = 1.0;
+            }
+            sparse_layer
+                .step(&mut s_state, &s_in, &mut out_sparse)
+                .unwrap();
+            batch_layer
+                .step_batch(&mut b_state, &dense_in, None, &mut out_batch)
+                .unwrap();
+            assert_eq!(
+                out_sparse.active(),
+                out_batch.column_to_sparse(0).active(),
+                "adLIF sparse/batch paths diverged at step {t}"
+            );
+            for i in 0..3 * n {
+                assert_eq!(
+                    s_state.as_mat()[(i, 0)],
+                    b_state.as_mat()[(i, 0)],
+                    "adLIF state diverged at step {t}, row {i}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn hetero_constructor_rejects_mixed_thresholds() {
         use crate::neuron::{AdLif, AdLifParams};
         let a = AdLif::new(AdLifParams::default()).unwrap();
