@@ -1,4 +1,7 @@
 /target
 /data/
 /article.md
+/blogs/
+/explainer.md
+/explainer.html
 .DS_Store
