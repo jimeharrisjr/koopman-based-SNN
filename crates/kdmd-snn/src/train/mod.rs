@@ -74,12 +74,34 @@ pub struct TrainConfig {
     /// optimizer, then clamped to τ_m ∈ [5, 100] ms, τ_s ∈ [2, 50] ms with
     /// τ_m ≥ 1.2·τ_s (keeps the γ formulas away from the degenerate limit).
     pub learn_tau: bool,
+    /// Temporal aggregation of the readout (see [`ReadoutMode`]).
+    /// `readout_decay` is only valid with `ReadoutMode::Count`.
+    pub readout_mode: ReadoutMode,
 }
 
 /// Learnable-τ clamp bounds (ms) — see [`TrainConfig::learn_tau`].
 const TAU_M_RANGE: (f64, f64) = (5.0, 100.0);
 const TAU_S_RANGE: (f64, f64) = (2.0, 50.0);
 const TAU_SEPARATION: f64 = 1.2;
+
+/// How the readout aggregates output spikes over time (docs/16). Every mode
+/// reduces **exactly** to the uniform count readout at its initialization, so
+/// a trained-readout run starts bit-for-bit (Count/StaticProfile) or
+/// FP-roundoff-close (SpikeAttention) at the baseline it is compared against
+/// — the round-2/round-6 "grow from identity" discipline.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReadoutMode {
+    /// `c = Σ_t s_t / T` — the campaign default (with `readout_decay` this
+    /// becomes the leaky trace of round 5's AC).
+    Count,
+    /// Learned static per-bin profile: `c = Σ_t w_t·s_t / T`, `w` initialized
+    /// to all-ones (= Count exactly) and trained jointly.
+    StaticProfile { t_steps: usize },
+    /// Spike-driven temporal attention: scores `z_t = u·s_t`, weights
+    /// `a = softmax_t(z)` per sample, `c = Σ_t a_t·s_t`; the query `u` is
+    /// zero-initialized (uniform attention = Count) and trained jointly.
+    SpikeAttention,
+}
 
 impl Default for TrainConfig {
     fn default() -> Self {
@@ -96,6 +118,7 @@ impl Default for TrainConfig {
             readout_decay: None,
             threads: 1,
             learn_tau: false,
+            readout_mode: ReadoutMode::Count,
         }
     }
 }
@@ -113,6 +136,10 @@ struct BatchGrads {
     /// layers without τ metadata or when `learn_tau` is off. The chain rule
     /// to τ itself is applied once, at update time.
     tau: Vec<Option<Mat<f64>>>,
+    /// Static-profile readout gradient (`1 × t_steps`), when that mode is on.
+    prof: Option<Mat<f64>>,
+    /// Attention-query gradient (`n_out × 1`), when that mode is on.
+    attn_u: Option<Mat<f64>>,
     /// Unnormalized Σ_b per-sample loss.
     loss_sum: f64,
     correct: usize,
@@ -138,6 +165,18 @@ impl BatchGrads {
         }
         for (a, b) in self.tau.iter_mut().zip(&other.tau) {
             if let (Some(a), Some(b)) = (a.as_mut(), b.as_ref()) {
+                for c in 0..a.ncols() {
+                    for i in 0..a.nrows() {
+                        a[(i, c)] += b[(i, c)];
+                    }
+                }
+            }
+        }
+        for (a, b) in [
+            (self.prof.as_mut(), other.prof.as_ref()),
+            (self.attn_u.as_mut(), other.attn_u.as_ref()),
+        ] {
+            if let (Some(a), Some(b)) = (a, b) {
                 for c in 0..a.ncols() {
                     for i in 0..a.nrows() {
                         a[(i, c)] += b[(i, c)];
@@ -177,6 +216,12 @@ pub struct Trainer {
     /// ln τ_m, row 1 = ln τ_s); `None` for layers without τ metadata.
     tau_rho: Vec<Option<Mat<f64>>>,
     opt_tau: Vec<Option<Adam>>,
+    /// Static temporal profile `1 × t_steps` (StaticProfile mode; init 1).
+    w_prof: Option<Mat<f64>>,
+    opt_prof: Option<Adam>,
+    /// Attention query `n_out × 1` (SpikeAttention mode; init 0).
+    attn_u: Option<Mat<f64>>,
+    opt_attn: Option<Adam>,
 }
 
 impl Trainer {
@@ -234,6 +279,33 @@ impl Trainer {
                     .into(),
             ));
         }
+        if cfg.readout_decay.is_some() && cfg.readout_mode != ReadoutMode::Count {
+            return Err(SnnError::InvalidParameter(
+                "readout_decay is only valid with ReadoutMode::Count".into(),
+            ));
+        }
+        let (w_prof, opt_prof) = match cfg.readout_mode {
+            ReadoutMode::StaticProfile { t_steps } => {
+                if t_steps == 0 {
+                    return Err(SnnError::InvalidParameter(
+                        "StaticProfile needs t_steps ≥ 1".into(),
+                    ));
+                }
+                // All-ones profile: exactly the count readout at step 0.
+                (
+                    Some(Mat::from_fn(1, t_steps, |_, _| 1.0)),
+                    Some(Adam::new(1, t_steps)),
+                )
+            }
+            _ => (None, None),
+        };
+        let (attn_u, opt_attn) = match cfg.readout_mode {
+            // Zero query: uniform attention = the count readout at step 0.
+            ReadoutMode::SpikeAttention => {
+                (Some(Mat::zeros(n_out, 1)), Some(Adam::new(n_out, 1)))
+            }
+            _ => (None, None),
+        };
         let opt_r = Adam::new(n_classes, n_out);
         Ok(Self {
             cfg,
@@ -243,7 +315,45 @@ impl Trainer {
             opt_r,
             tau_rho,
             opt_tau,
+            w_prof,
+            opt_prof,
+            attn_u,
+            opt_attn,
         })
+    }
+
+    /// The learned static temporal profile (StaticProfile mode).
+    pub fn temporal_profile(&self) -> Option<&Mat<f64>> {
+        self.w_prof.as_ref()
+    }
+
+    /// The learned attention query (SpikeAttention mode).
+    pub fn attention_query(&self) -> Option<&Mat<f64>> {
+        self.attn_u.as_ref()
+    }
+
+    /// Attention concentration on a batch: the mean over samples of
+    /// `max_t a_t`. Uniform attention gives exactly `1/t_steps`; larger
+    /// values mean the readout has learned to weight some bins over others.
+    /// `Ok(None)` when the readout is not SpikeAttention.
+    pub fn attention_concentration(
+        &self,
+        net: &mut Network,
+        inputs: &[SpikeBatch],
+    ) -> Result<Option<f64>, SnnError> {
+        let (_, _, _, attn, _) = self.forward(net, inputs, false)?;
+        Ok(attn.map(|a| {
+            let (t_total, batch) = (a.nrows(), a.ncols());
+            let mut acc = 0.0;
+            for b in 0..batch {
+                let mut mx = 0.0f64;
+                for t in 0..t_total {
+                    mx = mx.max(a[(t, b)]);
+                }
+                acc += mx;
+            }
+            acc / batch as f64
+        }))
     }
 
     /// Current per-neuron time constants of learnable-τ layers, per layer
@@ -271,8 +381,9 @@ impl Trainer {
     }
 
     /// Forward pass with tape; returns (per-step v_pre, per-step s_out,
-    /// optional learnable-τ tape of per-step (x_pre, drive), output spike
-    /// counts `n_out × batch`). The τ tape is collected only when
+    /// optional learnable-τ tape of per-step (x_pre, drive), optional
+    /// attention weights `t_steps × batch`, readout feature `c`
+    /// (`n_out × batch`)). The τ tape is collected only when
     /// `cfg.learn_tau` is set and `tau_tape` is requested.
     #[allow(clippy::type_complexity)]
     fn forward(
@@ -285,6 +396,7 @@ impl Trainer {
             Vec<Vec<Mat<f64>>>,
             Vec<Vec<SpikeBatch>>,
             Option<Vec<Vec<(Mat<f64>, Mat<f64>)>>>,
+            Option<Mat<f64>>,
             Mat<f64>,
         ),
         SnnError,
@@ -308,8 +420,21 @@ impl Trainer {
             want_tau.then(|| Vec::with_capacity(inputs.len()));
         let n_out = net.layer(n_layers - 1).n_neurons();
         let mut counts = Mat::<f64>::zeros(n_out, batch);
+        if let ReadoutMode::StaticProfile { t_steps } = self.cfg.readout_mode {
+            if inputs.len() != t_steps {
+                return Err(SnnError::DimensionMismatch(format!(
+                    "StaticProfile readout is sized for {t_steps} steps, got {}",
+                    inputs.len()
+                )));
+            }
+        }
+        // Attention scores z_t = u·s_t, filled online; softmaxed after the
+        // rollout (the normalization needs every step).
+        let mut attn_z: Option<Mat<f64>> =
+            matches!(self.cfg.readout_mode, ReadoutMode::SpikeAttention)
+                .then(|| Mat::zeros(inputs.len(), batch));
 
-        for input in inputs {
+        for (t, input) in inputs.iter().enumerate() {
             let mut v_pre: Vec<Mat<f64>> = (0..n_layers)
                 .map(|l| Mat::zeros(net.layer(l).n_neurons(), batch))
                 .collect();
@@ -331,35 +456,95 @@ impl Trainer {
                 net.step_batch_taped(input, &mut v_pre, &mut s_out)?;
             }
             let top = s_out[n_layers - 1].as_mat();
-            match self.cfg.readout_decay {
-                None => {
+            match self.cfg.readout_mode {
+                ReadoutMode::Count => match self.cfg.readout_decay {
+                    None => {
+                        for b in 0..batch {
+                            for i in 0..n_out {
+                                counts[(i, b)] += top[(i, b)];
+                            }
+                        }
+                    }
+                    // Leaky trace: trace ← κ·trace + s_t.
+                    Some(kappa) => {
+                        for b in 0..batch {
+                            for i in 0..n_out {
+                                counts[(i, b)] = kappa * counts[(i, b)] + top[(i, b)];
+                            }
+                        }
+                    }
+                },
+                ReadoutMode::StaticProfile { .. } => {
+                    let w = self.w_prof.as_ref().expect("profile allocated")[(0, t)];
                     for b in 0..batch {
                         for i in 0..n_out {
-                            counts[(i, b)] += top[(i, b)];
+                            counts[(i, b)] += w * top[(i, b)];
                         }
                     }
                 }
-                // Leaky trace: trace ← κ·trace + s_t.
-                Some(kappa) => {
+                ReadoutMode::SpikeAttention => {
+                    let u = self.attn_u.as_ref().expect("query allocated");
+                    let z = attn_z.as_mut().expect("scores allocated");
                     for b in 0..batch {
+                        let mut acc = 0.0;
                         for i in 0..n_out {
-                            counts[(i, b)] = kappa * counts[(i, b)] + top[(i, b)];
+                            acc += u[(i, 0)] * top[(i, b)];
                         }
+                        z[(t, b)] = acc;
                     }
                 }
             }
             v_pre_tape.push(v_pre);
             s_out_tape.push(s_out);
         }
-        Ok((v_pre_tape, s_out_tape, tau_tapes, counts))
+        // Attention: per-sample softmax over time, then c = Σ_t a_t·s_t.
+        let attn = match attn_z {
+            None => None,
+            Some(z) => {
+                let t_total = inputs.len();
+                let mut a = Mat::<f64>::zeros(t_total, batch);
+                for b in 0..batch {
+                    let mut mx = f64::NEG_INFINITY;
+                    for t in 0..t_total {
+                        mx = mx.max(z[(t, b)]);
+                    }
+                    let mut sum = 0.0;
+                    for t in 0..t_total {
+                        let e = (z[(t, b)] - mx).exp();
+                        a[(t, b)] = e;
+                        sum += e;
+                    }
+                    for t in 0..t_total {
+                        a[(t, b)] /= sum;
+                    }
+                }
+                for (t, s_out) in s_out_tape.iter().enumerate() {
+                    let top = s_out[n_layers - 1].as_mat();
+                    for b in 0..batch {
+                        let w = a[(t, b)];
+                        for i in 0..n_out {
+                            counts[(i, b)] += w * top[(i, b)];
+                        }
+                    }
+                }
+                Some(a)
+            }
+        };
+        Ok((v_pre_tape, s_out_tape, tau_tapes, attn, counts))
     }
 
-    /// Readout normalization: the effective mass of the (possibly leaky)
-    /// count over `t_steps` steps, so logits stay O(rate) regardless of κ.
+    /// Readout normalization: the effective mass of the aggregated feature,
+    /// so logits stay O(rate) across modes. Attention weights already sum to
+    /// one, so that mode needs no normalization — which is exactly what makes
+    /// zero-query attention identical to the count readout.
     fn readout_norm(&self, t_steps: usize) -> f64 {
-        match self.cfg.readout_decay {
-            None => t_steps as f64,
-            Some(kappa) => (1.0 - kappa.powi(t_steps as i32)) / (1.0 - kappa),
+        match self.cfg.readout_mode {
+            ReadoutMode::Count => match self.cfg.readout_decay {
+                None => t_steps as f64,
+                Some(kappa) => (1.0 - kappa.powi(t_steps as i32)) / (1.0 - kappa),
+            },
+            ReadoutMode::StaticProfile { .. } => t_steps as f64,
+            ReadoutMode::SpikeAttention => 1.0,
         }
     }
 
@@ -430,7 +615,7 @@ impl Trainer {
         let t_steps = inputs.len();
         let batch = net.batch();
         let n_layers = net.n_layers();
-        let (v_pre_tape, s_out_tape, tau_tapes, counts) = self.forward(net, inputs, true)?;
+        let (v_pre_tape, s_out_tape, tau_tapes, attn, counts) = self.forward(net, inputs, true)?;
 
         // logits = R · trace / norm (norm = T for the count readout, the
         // leaky-trace mass otherwise).
@@ -473,6 +658,34 @@ impl Trainer {
                 ds_top[(j, b)] = acc / norm;
             }
         }
+        // Attention backward, softmax part: with ∂L/∂c = ds_top and
+        // dLda_t = ds_top·s_t, the score gradient is the softmax Jacobian
+        // dz_t = a_t·(dLda_t − Σ_k a_k·dLda_k), computed per sample before
+        // the time loop (it couples all steps).
+        let attn_dz: Option<Mat<f64>> = attn.as_ref().map(|a| {
+            let mut dlda = Mat::<f64>::zeros(t_steps, batch);
+            for (t, s_out) in s_out_tape.iter().enumerate() {
+                let s_top = s_out[n_layers - 1].as_mat();
+                for b in 0..batch {
+                    let mut acc = 0.0;
+                    for j in 0..n_out {
+                        acc += ds_top[(j, b)] * s_top[(j, b)];
+                    }
+                    dlda[(t, b)] = acc;
+                }
+            }
+            let mut dz = Mat::<f64>::zeros(t_steps, batch);
+            for b in 0..batch {
+                let mut dot = 0.0;
+                for t in 0..t_steps {
+                    dot += a[(t, b)] * dlda[(t, b)];
+                }
+                for t in 0..t_steps {
+                    dz[(t, b)] = a[(t, b)] * (dlda[(t, b)] - dot);
+                }
+            }
+            dz
+        });
 
         // Backward through time.
         let mut grad_w: Vec<Mat<f64>> = (0..n_layers)
@@ -516,6 +729,11 @@ impl Trainer {
                     .map(|_| Mat::zeros(5, net.layer(l).n_neurons()))
             })
             .collect();
+        // Trained-readout gradients, where those modes are active.
+        let mut grad_prof: Option<Mat<f64>> =
+            self.w_prof.as_ref().map(|w| Mat::zeros(1, w.ncols()));
+        let mut grad_attn: Option<Mat<f64>> =
+            self.attn_u.as_ref().map(|u| Mat::zeros(u.nrows(), 1));
 
         // κ^(T−1−t) factor for the leaky readout (1.0 throughout for counts).
         let mut readout_scale = 1.0f64;
@@ -530,9 +748,45 @@ impl Trainer {
                 // g_s: downstream uses of this layer's spikes at step t.
                 let mut g_s = Mat::<f64>::zeros(n, batch);
                 if l == n_layers - 1 {
-                    for b in 0..batch {
-                        for j in 0..n {
-                            g_s[(j, b)] += readout_scale * ds_top[(j, b)];
+                    match self.cfg.readout_mode {
+                        ReadoutMode::Count => {
+                            for b in 0..batch {
+                                for j in 0..n {
+                                    g_s[(j, b)] += readout_scale * ds_top[(j, b)];
+                                }
+                            }
+                        }
+                        ReadoutMode::StaticProfile { .. } => {
+                            // ∂c/∂s_t = w_t/T (the /T is inside ds_top via
+                            // norm); ∂L/∂w_t = ds_top·s_t summed over (j, b).
+                            let w = self.w_prof.as_ref().expect("profile")[(0, t)];
+                            let s_top = s_out_tape[t][l].as_mat();
+                            let gp = grad_prof.as_mut().expect("profile grads");
+                            let mut acc = 0.0;
+                            for b in 0..batch {
+                                for j in 0..n {
+                                    g_s[(j, b)] += w * ds_top[(j, b)];
+                                    acc += ds_top[(j, b)] * s_top[(j, b)];
+                                }
+                            }
+                            gp[(0, t)] += acc;
+                        }
+                        ReadoutMode::SpikeAttention => {
+                            // Two spike paths: through the weighted sum
+                            // (a_t·ds_top) and through the score z_t = u·s_t
+                            // (dz_t·u); ∂L/∂u = Σ_t dz_t·s_t.
+                            let a = attn.as_ref().expect("attention weights");
+                            let dz = attn_dz.as_ref().expect("score grads");
+                            let u = self.attn_u.as_ref().expect("query");
+                            let s_top = s_out_tape[t][l].as_mat();
+                            let gu = grad_attn.as_mut().expect("query grads");
+                            for b in 0..batch {
+                                let (a_tb, dz_tb) = (a[(t, b)], dz[(t, b)]);
+                                for j in 0..n {
+                                    g_s[(j, b)] += a_tb * ds_top[(j, b)] + dz_tb * u[(j, 0)];
+                                    gu[(j, 0)] += dz_tb * s_top[(j, b)];
+                                }
+                            }
                         }
                     }
                 }
@@ -675,6 +929,8 @@ impl Trainer {
             rec: grad_rec,
             r: grad_r,
             tau: grad_tau,
+            prof: grad_prof,
+            attn_u: grad_attn,
             loss_sum,
             correct,
         })
@@ -830,6 +1086,36 @@ impl Trainer {
         self.opt_r.update(&mut r, &grad_r, &self.cfg.optim);
         self.r = r;
 
+        // Trained-readout parameters, clipped consistently with the other
+        // parameter groups.
+        let clip_mat = |g: &Mat<f64>, clip: Option<f64>| -> Mat<f64> {
+            let mut g = g.clone();
+            if let Some(c) = clip {
+                for col in 0..g.ncols() {
+                    for i in 0..g.nrows() {
+                        g[(i, col)] = g[(i, col)].clamp(-c, c);
+                    }
+                }
+            }
+            g
+        };
+        if let (Some(w), Some(opt), Some(g)) = (
+            self.w_prof.as_mut(),
+            self.opt_prof.as_mut(),
+            grads.prof.as_ref(),
+        ) {
+            let g = clip_mat(g, self.cfg.grad_clip);
+            opt.update(w, &g, &self.cfg.optim);
+        }
+        if let (Some(u), Some(opt), Some(g)) = (
+            self.attn_u.as_mut(),
+            self.opt_attn.as_mut(),
+            grads.attn_u.as_ref(),
+        ) {
+            let g = clip_mat(g, self.cfg.grad_clip);
+            opt.update(u, &g, &self.cfg.optim);
+        }
+
         // Learnable τ: chain the summed entry gradients through the analytic
         // ∂entry/∂τ, then through τ = exp(ρ) (log-space parameters), update ρ
         // with the shared optimizer, clamp, and write the new propagator
@@ -927,7 +1213,7 @@ impl Trainer {
         let batch = net.batch();
         let threads = self.cfg.threads.max(1).min(batch);
         let counts = if threads == 1 || inputs.is_empty() {
-            self.forward(net, inputs, false)?.3
+            self.forward(net, inputs, false)?.4
         } else {
             let base = batch / threads;
             let rem = batch % threads;
@@ -955,7 +1241,7 @@ impl Trainer {
                 let handles: Vec<_> = chunk_nets
                     .iter_mut()
                     .zip(&chunk_inputs)
-                    .map(|(cnet, cin)| scope.spawn(move || Ok(self.forward(cnet, cin, false)?.3)))
+                    .map(|(cnet, cin)| scope.spawn(move || Ok(self.forward(cnet, cin, false)?.4)))
                     .collect();
                 handles
                     .into_iter()
@@ -1002,7 +1288,7 @@ impl Trainer {
         targets: &[usize],
         eps: f64,
     ) -> Result<f64, SnnError> {
-        let (_, _, _, counts) = self.forward(net, inputs, false)?;
+        let (_, _, _, _, counts) = self.forward(net, inputs, false)?;
         let t_steps = inputs.len();
         let (classes, n_out) = (self.r.nrows(), self.r.ncols());
         let logits_for = |r: &Mat<f64>| {

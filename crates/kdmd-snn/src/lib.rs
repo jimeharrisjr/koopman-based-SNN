@@ -59,4 +59,4 @@ pub use return_map::{DictionaryFamily, FitDiagnostics, IzhikevichReturnMap, Retu
 pub use spikes::{SpikeBatch, SpikeVec};
 pub use state::LayerState;
 pub use surrogate::{IzhikevichSurrogate, SurrogateConfig, SurrogateRollout};
-pub use train::{OptimConfig, StepStats, SurrogateKind, TrainConfig, Trainer};
+pub use train::{OptimConfig, ReadoutMode, StepStats, SurrogateKind, TrainConfig, Trainer};

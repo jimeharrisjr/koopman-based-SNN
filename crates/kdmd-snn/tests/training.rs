@@ -584,6 +584,168 @@ fn learn_tau_trains_and_moves_the_time_constants() {
 }
 
 #[test]
+fn trained_readouts_init_identical_to_count() {
+    // Both trained-readout modes must start AT the count-readout baseline:
+    // the static profile (all-ones) bitwise, the zero-query attention to FP
+    // roundoff (its uniform weights are accumulated per step rather than
+    // summed then divided).
+    use kdmd_snn::ReadoutMode;
+    let mut rng = StdRng::seed_from_u64(83);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let (inputs, targets) = minibatch(&task, &mut rng);
+
+    let make = |mode: ReadoutMode| {
+        let mut net = build_net(4);
+        let trainer = Trainer::new(
+            &net,
+            N_CLASSES,
+            TrainConfig {
+                readout_mode: mode,
+                ..TrainConfig::default()
+            },
+        )
+        .unwrap();
+        let lg = trainer.logits(&mut net, &inputs).unwrap();
+        (net, trainer, lg)
+    };
+    let (_, _, lg_count) = make(ReadoutMode::Count);
+    let (_, _, lg_static) = make(ReadoutMode::StaticProfile { t_steps: T_STEPS });
+    let (_, _, lg_attn) = make(ReadoutMode::SpikeAttention);
+    for b in 0..BATCH {
+        for i in 0..N_CLASSES {
+            assert_eq!(
+                lg_count[(i, b)],
+                lg_static[(i, b)],
+                "static-profile logits differ at init ({i},{b})"
+            );
+            assert!(
+                (lg_count[(i, b)] - lg_attn[(i, b)]).abs() <= 1e-12,
+                "attention logits differ at init ({i},{b}): {} vs {}",
+                lg_count[(i, b)],
+                lg_attn[(i, b)]
+            );
+        }
+    }
+
+    // And the first training loss matches (identical forward).
+    let mut net_c = build_net(4);
+    let mut tr_c = Trainer::new(&net_c, N_CLASSES, TrainConfig::default()).unwrap();
+    let mut net_s = build_net(4);
+    let mut tr_s = Trainer::new(
+        &net_s,
+        N_CLASSES,
+        TrainConfig {
+            readout_mode: ReadoutMode::StaticProfile { t_steps: T_STEPS },
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+    let sc = tr_c.train_step(&mut net_c, &inputs, &targets).unwrap();
+    let ss = tr_s.train_step(&mut net_s, &inputs, &targets).unwrap();
+    assert_eq!(sc.loss, ss.loss, "first-step loss differs (static profile)");
+}
+
+#[test]
+fn trained_readouts_learn_and_engage() {
+    // Both modes must train (finite, decreasing loss) and actually move
+    // their temporal parameters off the identity.
+    use kdmd_snn::ReadoutMode;
+    for (mode, name) in [
+        (ReadoutMode::StaticProfile { t_steps: T_STEPS }, "static"),
+        (ReadoutMode::SpikeAttention, "attention"),
+    ] {
+        let mut rng = StdRng::seed_from_u64(61);
+        let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+        let mut net = build_net(12);
+        let mut trainer = Trainer::new(
+            &net,
+            N_CLASSES,
+            TrainConfig {
+                readout_mode: mode,
+                threads: 2,
+                ..TrainConfig::default()
+            },
+        )
+        .unwrap();
+        let mut losses = Vec::new();
+        for step in 0..200 {
+            let (inputs, targets) = minibatch(&task, &mut rng);
+            let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+            assert!(
+                stats.loss.is_finite(),
+                "{name}: loss diverged at step {step}"
+            );
+            losses.push(stats.loss);
+        }
+        let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+        let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+        assert!(
+            late < 0.6 * early,
+            "{name}: training did not reduce the loss: early {early:.4}, late {late:.4}"
+        );
+        match mode {
+            ReadoutMode::StaticProfile { .. } => {
+                let w = trainer.temporal_profile().unwrap();
+                let dev = (0..w.ncols())
+                    .map(|t| (w[(0, t)] - 1.0).abs())
+                    .fold(0.0f64, f64::max);
+                assert!(dev > 0.01, "static profile never left the identity ({dev:.4})");
+            }
+            ReadoutMode::SpikeAttention => {
+                let u = trainer.attention_query().unwrap();
+                let norm: f64 = (0..u.nrows()).map(|j| u[(j, 0)].abs()).sum();
+                assert!(norm > 1e-3, "attention query never left zero ({norm:.2e})");
+            }
+            ReadoutMode::Count => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn attention_readout_threaded_matches_serial() {
+    // The new readout gradients must survive the data-parallel chunking like
+    // every other parameter group.
+    use kdmd_snn::ReadoutMode;
+    let mut rng = StdRng::seed_from_u64(101);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let (inputs, targets) = minibatch(&task, &mut rng);
+    let run = |threads: usize| {
+        let mut net = build_net(13);
+        let mut trainer = Trainer::new(
+            &net,
+            N_CLASSES,
+            TrainConfig {
+                readout_mode: ReadoutMode::SpikeAttention,
+                threads,
+                ..TrainConfig::default()
+            },
+        )
+        .unwrap();
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        let u = trainer.attention_query().unwrap().clone();
+        (stats.loss, u, net)
+    };
+    let (l1, u1, net1) = run(1);
+    let (l3, u3, net3) = run(3);
+    assert!((l1 - l3).abs() < 1e-12, "loss differs across threading");
+    for j in 0..u1.nrows() {
+        assert!(
+            (u1[(j, 0)] - u3[(j, 0)]).abs() <= 1e-12,
+            "attention-query update differs at {j}"
+        );
+    }
+    let (wa, wb) = (net1.layer(0).weights(), net3.layer(0).weights());
+    for j in 0..wa.ncols() {
+        for i in 0..wa.nrows() {
+            assert!(
+                (wa[(i, j)] - wb[(i, j)]).abs() <= 1e-12 * wa[(i, j)].abs().max(1.0),
+                "weights differ at ({i},{j})"
+            );
+        }
+    }
+}
+
+#[test]
 fn surrogate_bptt_learns_the_poisson_pattern_task() {
     let mut rng = StdRng::seed_from_u64(17);
     // Two random rate patterns over 24 channels: 0.12 spikes/ms on active

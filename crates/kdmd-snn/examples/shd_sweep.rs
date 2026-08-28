@@ -18,7 +18,7 @@ use std::time::Instant;
 use faer::Mat;
 use kdmd_snn::data::shd::{bin_events, load_shd, ShdSample};
 use kdmd_snn::neuron::{AdLif, AdLifParams, Lif, LifParams};
-use kdmd_snn::{KoopmanLayer, Network, SpikeBatch, TrainConfig, Trainer};
+use kdmd_snn::{KoopmanLayer, Network, ReadoutMode, SpikeBatch, TrainConfig, Trainer};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -64,6 +64,19 @@ struct ExpConfig {
     /// and training moves each neuron's τ_m/τ_s by backprop through the
     /// propagator entries (docs/14 pre-registration).
     learn_tau: bool,
+    /// Temporal readout under test (docs/16 pre-registration). Both trained
+    /// modes initialize as exactly the count readout.
+    readout: TemporalReadout,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TemporalReadout {
+    /// Uniform spike count (the campaign default).
+    Count,
+    /// Learned static per-bin profile, init all-ones.
+    Static,
+    /// Spike-driven attention over time, query init zero.
+    Attention,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -96,6 +109,7 @@ const BASE: ExpConfig = ExpConfig {
     readout_decay: None,
     ensemble: 1,
     learn_tau: false,
+    readout: TemporalReadout::Count,
 };
 
 /// Adaptation defaults for the ALIF rounds (dt = 10 ms bins): τ_w = 150 ms
@@ -439,6 +453,29 @@ const EXPERIMENTS: &[ExpConfig] = &[
         learn_tau: true,
         ..BASE
     },
+    // Trained temporal readouts (improvements.md P1.1-rerank; docs/16).
+    ExpConfig {
+        tag: "AI",
+        name: "X recipe + learned static temporal profile",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        readout: TemporalReadout::Static,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "AJ",
+        name: "X recipe + spike-driven temporal attention",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        readout: TemporalReadout::Attention,
+        ..BASE
+    },
 ];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
@@ -617,6 +654,13 @@ fn run_experiment(
                 readout_decay: cfg.readout_decay,
                 threads,
                 learn_tau: cfg.learn_tau,
+                readout_mode: match cfg.readout {
+                    TemporalReadout::Count => ReadoutMode::Count,
+                    TemporalReadout::Static => ReadoutMode::StaticProfile {
+                        t_steps: cfg.t_steps,
+                    },
+                    TemporalReadout::Attention => ReadoutMode::SpikeAttention,
+                },
                 ..TrainConfig::default()
             },
         )
@@ -659,6 +703,18 @@ fn run_experiment(
                 recent.clear();
             }
         }
+        // Trained-readout engagement summary.
+        if let Some(w) = trainer.temporal_profile() {
+            let vals: Vec<f64> = (0..w.ncols()).map(|t| w[(0, t)]).collect();
+            let mean = vals.iter().sum::<f64>() / vals.len() as f64;
+            let lo = vals.iter().cloned().fold(f64::MAX, f64::min);
+            let hi = vals.iter().cloned().fold(f64::MIN, f64::max);
+            println!("  readout profile: mean {mean:.3} [{lo:.3}, {hi:.3}] (init 1.0)");
+        }
+        if let Some(u) = trainer.attention_query() {
+            let linf = (0..u.nrows()).map(|j| u[(j, 0)].abs()).fold(0.0f64, f64::max);
+            println!("  readout attention query: max |u| = {linf:.4} (init 0)");
+        }
         // Learned-τ summary: where did training move the time constants?
         if cfg.learn_tau {
             for (l, taus) in trainer.taus(&net).iter().enumerate() {
@@ -685,6 +741,7 @@ fn run_experiment(
     // Full test set, all complete batches, fixed order; ensemble members'
     // logits are summed before the argmax.
     let (mut correct, mut total) = (0usize, 0usize);
+    let mut concentration_reported = false;
     for chunk in test.chunks(BATCH) {
         if chunk.len() < BATCH {
             break;
@@ -694,6 +751,20 @@ fn run_experiment(
         for (b, sample) in chunk.iter().enumerate() {
             targets.push(sample.label);
             write_sample(sample, &mut inputs, b, cfg).unwrap();
+        }
+        // Attention mechanism probe (docs/16): mean max_t a_t on the first
+        // full test batch; uniform attention gives exactly 1/t_steps.
+        if !concentration_reported && cfg.readout == TemporalReadout::Attention {
+            for (m, (net, trainer)) in members.iter_mut().enumerate() {
+                if let Some(c) = trainer.attention_concentration(net, &inputs).unwrap() {
+                    println!(
+                        "  attention concentration (member {m}, first test batch): \
+                         mean max_t a_t = {c:.4} (uniform = {:.4})",
+                        1.0 / cfg.t_steps as f64
+                    );
+                }
+            }
+            concentration_reported = true;
         }
         let mut sum_logits = Mat::<f64>::zeros(N_CLASSES, BATCH);
         for (net, trainer) in members.iter_mut() {
