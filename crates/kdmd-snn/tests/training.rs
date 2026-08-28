@@ -702,6 +702,64 @@ fn trained_readouts_learn_and_engage() {
 }
 
 #[test]
+fn learned_tau_and_attention_compose() {
+    // The combination round (docs/18) runs learnable τ and the attention
+    // readout together for the first time; this gate proves the two
+    // mechanisms coexist: training stays finite, reduces the loss, and BOTH
+    // parameter groups engage, under the threaded path.
+    use kdmd_snn::ReadoutMode;
+    let mut rng = StdRng::seed_from_u64(113);
+    let w = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+    let layer = KoopmanLayer::lif_hetero(
+        &vec![20.0; N_HIDDEN],
+        &vec![10.0; N_HIDDEN],
+        1.0,
+        DT,
+        1.0,
+        w,
+        BATCH,
+    )
+    .unwrap()
+    .with_recurrent(Mat::zeros(N_HIDDEN, N_HIDDEN))
+    .unwrap();
+    let mut net = Network::new(vec![layer], BATCH).unwrap();
+    let mut trainer = Trainer::new(
+        &net,
+        N_CLASSES,
+        TrainConfig {
+            learn_tau: true,
+            readout_mode: ReadoutMode::SpikeAttention,
+            threads: 2,
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let mut losses = Vec::new();
+    for step in 0..200 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.7 * early,
+        "combined training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+    // Both mechanisms moved.
+    let meta = net.layer(0).lif_taus().expect("τ metadata");
+    let tau_moved = (0..N_HIDDEN)
+        .map(|j| (meta.taus_m[j] - 20.0).abs().max((meta.taus_s[j] - 10.0).abs()))
+        .fold(0.0f64, f64::max);
+    assert!(tau_moved > 0.05, "τ never moved under the combination");
+    let u = trainer.attention_query().unwrap();
+    let u_norm: f64 = (0..u.nrows()).map(|j| u[(j, 0)].abs()).sum();
+    assert!(u_norm > 1e-3, "attention query never moved under the combination");
+}
+
+#[test]
 fn attention_readout_threaded_matches_serial() {
     // The new readout gradients must survive the data-parallel chunking like
     // every other parameter group.

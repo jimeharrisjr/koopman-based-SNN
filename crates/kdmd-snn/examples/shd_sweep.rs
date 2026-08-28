@@ -476,6 +476,34 @@ const EXPERIMENTS: &[ExpConfig] = &[
         readout: TemporalReadout::Attention,
         ..BASE
     },
+    // The combination round (docs/18): every engaged-but-null mechanism from
+    // rounds 5–7 together, plus the missing single-axis cell.
+    ExpConfig {
+        tag: "AK",
+        name: "COMBINATION: attention + learnable tau + 5 ms bins, X recipe",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "AL",
+        name: "5 ms bins alone on the X recipe (missing single-axis cell)",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        bin_s: 0.005,
+        t_steps: 200,
+        ..BASE
+    },
 ];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
