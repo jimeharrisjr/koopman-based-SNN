@@ -349,7 +349,7 @@ def fig5_surrogate():
     ax.set_title("(b) backward pass: surrogate slope", fontsize=9.5, loc="left")
     ax.set_xlabel(r"$v - \theta$")
     ax.set_ylabel(r"$(1 + \beta|v - \theta|)^{-2}$")
-    fig.savefig(OUT / "fig06-surrogate.png")
+    fig.savefig(OUT / "fig08-surrogate.png")
     plt.close(fig)
     print("fig5 done")
 
@@ -379,49 +379,55 @@ def fig6_training_curves():
     ax.set_xlabel("minibatch")
     ax.set_title("(b) augmentation at 6,000 minibatches", fontsize=9.5, loc="left")
     ax.legend()
-    fig.savefig(OUT / "fig07-training-curves.png")
+    fig.savefig(OUT / "fig09-training-curves.png")
     plt.close(fig)
     print("fig6 done")
 
 
 # ------------------------------------------------------------------- Figure 7
 def fig7_campaign():
+    # Honest values: multi-seed means where measured (rounds 3/4 revised by
+    # the round-6 audits; rounds 6-7 were single-axis nulls, shown flat).
     stages = [
         ("first\ndemo", 0.502),
         ("round 1\nfiner input\n+ budget", 0.680),
         ("round 2\nrecurrence", 0.808),
-        ("round 3\naugmentation\n× budget", 0.873),
-        ("round 4\n+ 2nd layer", 0.886),
-        ("round 5\nensemble\n×3", 0.882),
+        ("round 3\naug ×\nbudget", 0.850),
+        ("round 4\n+ 2nd\nlayer", 0.856),
+        ("rounds 5–7\naudits +\nsingle-axis\nnulls", 0.856),
+        ("round 8\ncombination", 0.8888),
+        ("round 9\nensemble\n×3", 0.9000),
+        ("round 10\ndiverse\nensemble", 0.9179),
     ]
     xs = np.arange(len(stages))
     ys = [s[1] for s in stages]
-    fig, ax = plt.subplots(figsize=(6.8, 3.6), layout="constrained")
+    fig, ax = plt.subplots(figsize=(7.2, 3.8), layout="constrained")
     ax.axhspan(0.48, 0.71, color=st.BAND_FF, zorder=0)
     ax.axhspan(0.71, 0.83, color=st.BAND_REC, zorder=0)
     ax.axhspan(0.90, 0.94, color=st.SEQ100, zorder=0)
-    ax.text(5.42, 0.60, "published\nfeedforward SNNs", fontsize=8, color=st.MUTED,
+    ax.text(8.45, 0.60, "published\nfeedforward SNNs", fontsize=8, color=st.MUTED,
             ha="left", va="center")
-    ax.text(5.42, 0.77, "published\nrecurrent SNNs", fontsize=8, color=st.MUTED,
+    ax.text(8.45, 0.77, "published\nrecurrent SNNs", fontsize=8, color=st.MUTED,
             ha="left", va="center")
-    ax.text(5.42, 0.92, "published\nstate of the art", fontsize=8, color=st.INK2,
+    ax.text(8.45, 0.935, "published\nstate of\nthe art", fontsize=8, color=st.INK2,
             ha="left", va="center")
-    ax.errorbar([3], [0.873], yerr=[[0.054], [0.0]], color=st.CRITICAL,
-                lw=1.4, capsize=4, zorder=4, fmt="none")
-    ax.text(3.12, 0.833, "seed spread\n(3 seeds: 0.819–0.873)", fontsize=7.8,
-            color=st.CRITICAL, va="center")
+    ax.errorbar([3, 4, 6], [0.850, 0.856, 0.8888],
+                yerr=[[0.027, 0.036, 0.019], [0.027, 0.036, 0.019]],
+                color=st.CRITICAL, lw=1.2, capsize=3, zorder=4, fmt="none")
+    ax.text(3.0, 0.79, "seed spreads\n(3-seed audits)", fontsize=7.8,
+            color=st.CRITICAL, va="center", ha="center")
     ax.plot(xs, ys, "-", color=st.BLUE, lw=1.9, zorder=3)
     ax.plot(xs, ys, "o", color=st.BLUE, ms=6, zorder=4)
     for x, y in zip(xs, ys):
         ax.annotate(f"{y:.3f}", xy=(x, y), xytext=(0, 8),
                     textcoords="offset points", ha="center", fontsize=8.7,
                     color=st.INK)
-    ax.set_xticks(xs, [s[0] for s in stages], fontsize=8.3)
+    ax.set_xticks(xs, [s[0] for s in stages], fontsize=7.3)
     ax.set_ylabel("SHD test accuracy")
-    ax.set_xlim(-0.4, 7.6)
+    ax.set_xlim(-0.4, 10.6)
     ax.set_ylim(0.46, 0.96)
     ax.grid(axis="x", visible=False)
-    fig.savefig(OUT / "fig08-campaign.png")
+    fig.savefig(OUT / "fig10-campaign.png")
     plt.close(fig)
     print("fig7 done")
 
@@ -476,7 +482,7 @@ def fig8_round5():
     ax.set_title("(b) round-5 variations vs. baseline mean",
                  fontsize=9.5, loc="left")
     ax.grid(axis="y", visible=False)
-    fig.savefig(OUT / "fig09-round5.png")
+    fig.savefig(OUT / "fig11-round5.png")
     plt.close(fig)
     print("fig8 done")
 
@@ -524,9 +530,89 @@ def fig9_negative():
     ax.set_title("(b) V2b: spike-to-spike return map\n(Izhikevich RS, degree 3)",
                  fontsize=9.5, loc="left")
     ax.grid(axis="x", visible=False)
-    fig.savefig(OUT / "fig05-negative-results.png")
+    fig.savefig(OUT / "fig07-negative-results.png")
     plt.close(fig)
     print("fig9 done")
+
+
+# ------------------------------------------------------------------- Figure 5
+def fig5_probe_richness():
+    """S-A (docs/26): known-B recovery vs driven-channel count, N = 32.
+    Values transcribed from demo/probe-richness-log.txt."""
+    m = [1, 2, 4, 8, 16, 32]
+    full_err = [8.960e-1, 8.669e-1, 7.693e-1, 7.073e-1, 5.783e-1, 2.316e-4]
+    sub_err = [1.262e-6, 2.042e-6, 1.575e-6, 3.225e-6, 5.471e-6, 2.316e-4]
+    fig, ax = plt.subplots(figsize=(5.6, 3.0), layout="constrained")
+    ax.semilogy(m, full_err, "o-", color=st.BLUE, ms=5, label="full $\\hat A$ error")
+    ax.semilogy(m, sub_err, "o-", color=st.AQUA, ms=5,
+                label="error on the excited subspace")
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(m, [str(v) for v in m])
+    ax.set_xlabel("independently driven input channels $m$ (of $N$ = 32)")
+    ax.set_ylabel(r"$\|\hat A - A\|_F / \|A\|_F$")
+    ax.annotate("the $m = N$ cliff:\nfour orders in one doubling",
+                xy=(32, 2.3e-4), xytext=(7, 3e-3), fontsize=8, color=st.INK2,
+                arrowprops=dict(arrowstyle="->", color=st.MUTED, lw=1.0))
+    ax.legend(loc="center left", fontsize=8)
+    fig.savefig(OUT / "fig05-probe-richness.png")
+    plt.close(fig)
+    print("fig5 (probe richness) done")
+
+
+# ------------------------------------------------------------------- Figure 6
+def fig6_gradient_horizon():
+    """S-B (docs/26): measured backward decay factor vs the spectral
+    prediction, both regimes. Values from demo/grad-horizon-log.txt."""
+    taus = [10, 20, 40, 80]
+    silent = [0.946, 0.927, 0.955, 0.968]   # rho_hat / alpha
+    active = [1.021, 0.947, 0.880, 0.749]
+    fig, ax = plt.subplots(figsize=(5.6, 3.0), layout="constrained")
+    ax.axhline(1.0, color=st.CRITICAL, lw=1.1, ls=(0, (4, 3)))
+    ax.text(78, 1.015, "leak bound $\\rho = \\alpha$", color=st.CRITICAL,
+            fontsize=8, ha="right")
+    ax.plot(taus, silent, "o-", color=st.BLUE, ms=5.5,
+            label="sub-threshold (silent) regime")
+    ax.plot(taus, active, "o-", color=st.ORANGE, ms=5.5,
+            label="spiking (trained) regime")
+    ax.annotate("trained recurrence\nbeats the leak bound", xy=(10, 1.021),
+                xytext=(14, 1.05), fontsize=8, color=st.ORANGE,
+                arrowprops=dict(arrowstyle="->", color=st.ORANGE, lw=1.0))
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(taus, [str(t) for t in taus])
+    ax.set_xlabel(r"membrane time constant $\tau_m$ (ms)")
+    ax.set_ylabel(r"measured $\hat\rho \, / \, \alpha$")
+    ax.set_ylim(0.7, 1.12)
+    ax.legend(loc="lower left", fontsize=8)
+    fig.savefig(OUT / "fig06-gradient-horizon.png")
+    plt.close(fig)
+    print("fig6 (gradient horizon) done")
+
+
+# ------------------------------------------------------------------ Figure 12
+def fig12_rom_map():
+    """S-C (docs/26): spiking-ROM coincidence vs POD rank at three firing
+    rates. Values from demo/spiking-rom-log.txt (N = 64, state dim 128)."""
+    ranks = [8, 16, 32, 64, 128]
+    rates = [
+        ("3.6% firing", [0.1166, 0.1286, 0.1653, 0.1777, 1.0], st.BLUE),
+        ("8.0% firing", [0.3044, 0.3376, 0.3694, 0.4052, 1.0], st.ORANGE),
+        ("20.3% firing", [0.7059, 0.7692, 0.8259, 0.9490, 1.0], st.AQUA),
+    ]
+    fig, ax = plt.subplots(figsize=(5.6, 3.0), layout="constrained")
+    for label, ys, color in rates:
+        ax.plot(ranks, ys, "o-", color=color, ms=5, label=label)
+    ax.axvline(64, color=st.BASELINE, lw=0.9, ls=(0, (3, 3)))
+    ax.text(64, 0.06, "half state\n($r = N$)", fontsize=7.5, color=st.MUTED,
+            ha="center")
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(ranks, [str(r) for r in ranks])
+    ax.set_xlabel("POD rank $r$ (full state = 128)")
+    ax.set_ylabel("spike coincidence (±2 bins)")
+    ax.set_ylim(0, 1.06)
+    ax.legend(loc="upper left", fontsize=8)
+    fig.savefig(OUT / "fig12-rom-map.png")
+    plt.close(fig)
+    print("fig12 (ROM map) done")
 
 
 if __name__ == "__main__":
@@ -534,9 +620,12 @@ if __name__ == "__main__":
     fig2_formulation()
     fig3_exactness()
     fig4_identification()
+    fig5_probe_richness()
+    fig6_gradient_horizon()
+    fig9_negative()
     fig5_surrogate()
     fig6_training_curves()
     fig7_campaign()
     fig8_round5()
-    fig9_negative()
+    fig12_rom_map()
     print("all figures written to", OUT)
