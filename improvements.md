@@ -28,36 +28,38 @@ ensemble, and margins under ~3 points are reported as inconclusive.
 
 ## P1 — Accuracy on SHD (closing ~3.5 points to the 0.90–0.94 band)
 
-1. **A trained temporal readout that *adds* memory — now the top item.**
-   The count readout is load-bearing (recency-weighting collapsed accuracy
-   14 pts, tag AC), so any replacement must extend it, not discard it.
-   Candidate: learned per-bin attention weights over the spike-count trace,
-   initialized uniform — the same "grow from the identity" trick that made
-   recurrence work from zero-init (tag L). Promoted after the learned-τ
-   null: two neuron-model features in a row (adaptation, τ) failed to
-   transfer alone, pointing at the readout as the binding constraint.
-   ✦ *Implemented and pre-registered 2026-08-27 (`docs/16`): two arms —
-   AI (learned static per-bin profile) and AJ (spike-driven softmax
-   attention), both identity-initialized and test-gated; control = round-6
-   X 3-seed arm. Awaiting the registered runs.*
-2. **Learned per-neuron time constants.** ⚪ *Run 2026-08-27 — NULL*
+1. **Augmentation variety — now the top item** (was #3). The budget ceiling
+   is real: 12,000 minibatches overfit even with the current augmentation
+   (tag U). New corruptions to try cheaply in the harness: channel dropout,
+   additive spike noise, mixup-style event-stream blends. More epochs is a
+   dead lever. Promoted by the registered consequence of round 7 (docs/17).
+2. **The combination round** (attention × learned τ × 5 ms bins): after four
+   single-axis literature features came back null/negative *with engaged
+   mechanisms* (adaptation r4, learned τ r6, static profile r7, attention
+   r7), the standing attribution is that the ~4-point gap to 0.90+ lives in
+   joint interactions. One registered round combining the engaged-but-null
+   features is the designated test of that attribution.
+3. **A trained temporal readout.** ⚫ *Run 2026-08-27 — AI NEGATIVE
+   (−2.0), AJ NULL (+0.3)* (pre-registered docs/16, results docs/17). Both
+   mechanisms engaged; a learned static profile is actively harmful, and
+   spike attention buys no mean accuracy — though its seed spread was ~3×
+   tighter than the control's (worst member 0.8504 vs 0.8165; post-hoc,
+   n = 3). Both modes ship in the library (`ReadoutMode`, inert by
+   default). Attention returns in the combination round.
+4. **Learned per-neuron time constants.** ⚪ *Run 2026-08-27 — NULL*
    (pre-registered docs/14, results docs/15): mean(AG) − mean(X) = −0.0137
    over 3 seeds, inside the ±0.015 band, with the mechanism strongly engaged
    (τ distributions spread across the full clamp range). Implementation
-   ships in the library (`learn_tau`, inert when off). Retry **only in
-   combination**: learned τ × 5 ms bins × trained temporal readout — the
-   configuration where the published wins actually live.
-3. **Augmentation variety, not volume.** The budget ceiling is real: 12,000
-   minibatches overfit even with current augmentation (tag U). New
-   corruptions to try cheaply in the harness: channel dropout, additive spike
-   noise, mixup-style event-stream blends. More epochs is a dead lever.
-4. **Depth's enabling ingredient.** A third layer lost ~2 pts at 1.5× cost
+   ships in the library (`learn_tau`, inert when off). Returns in the
+   combination round (item 2).
+5. **Depth's enabling ingredient.** A third layer lost ~2 pts at 1.5× cost
    (tag AE); the pattern all campaign is that each depth increment needs a
    new ingredient. One focused experiment each: per-layer learning rates,
    skip connections, a normalization analog. Not a sweep.
-5. **Diverse ensembles.** Same-architecture members correlate too much (AF
+6. **Diverse ensembles.** Same-architecture members correlate too much (AF
    bought robustness, not a leap). Ensemble *different* recipes: one-layer,
-   two-layer, ALIF-with-learned-τ, 5 ms bins.
+   two-layer, attention-readout (its tight seed spread makes it a natural
+   ensemble member), 5 ms bins.
 
 ## P2 — Library engineering
 

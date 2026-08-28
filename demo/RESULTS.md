@@ -364,3 +364,34 @@ Adam with clamps. Raw log: `sweep-AG-AH-X-log.txt`.
   carried by readout × time-resolution jointly, not neuron-model features.
   Next per the re-ranked roadmap: a trained temporal readout, then the
   combination experiment (learned τ × 5 ms bins × that readout).
+
+## Round 7 — trained temporal readouts (pre-registered: docs/16) — **AI NEGATIVE, AJ NULL**
+
+Two identity-initialized readouts on the X recipe, 3 seeds each, scored
+against round 6's X control (mean 0.8563; reuse registered in docs/16). New
+library support: `ReadoutMode::StaticProfile` (per-bin weights, init
+all-ones = bitwise the count readout) and `ReadoutMode::SpikeAttention`
+(scores u·s_t, softmax over time, u init 0 = uniform attention), both
+trained jointly through hand-rolled backward passes (softmax Jacobian and
+both spike paths), all test-gated. Raw log: `sweep-AI-AJ-log.txt`; full
+analysis: docs/17.
+
+| arm | seeds | mean ± half-range | Δ vs X mean | verdict |
+|---|---|---|---|---|
+| AI (static profile) | 0.8442 / 0.8393 / 0.8254 | 0.8363 ± 0.0094 | **−0.0200** | **NEGATIVE** |
+| AJ (spike attention) | 0.8504 / 0.8754 / 0.8522 | 0.8594 ± 0.0125 | +0.0031 | **NULL** |
+
+- **Both mechanisms engaged hard** (profiles swung to [−3.5, +6.5] with
+  sign flips; attention concentrated 6–7× uniform), so these are verdicts
+  on working features. A *learned* static profile is actively worse than
+  uniform — AC's recency lesson generalizes: any fixed temporal weighting
+  discards evidence because word alignment varies per sample. Data-dependent
+  attention fixes the harm but buys no mean accuracy.
+- **Post-hoc observation (not registered):** AJ's seed spread is ~3× tighter
+  than the control's (±0.0125 vs ±0.0359; worst member 0.8504 vs 0.8165) —
+  attention may stabilize rather than lift. n = 3; hypothesis only.
+- **Single-axis scoreboard after seven rounds:** adaptation −, learned τ 0,
+  static readout −, attention 0 — four literature features, none transfers
+  alone. The registered consequence: readout axis closes, augmentation
+  variety tops the re-ranked list, and one combination round (attention ×
+  learned τ × 5 ms bins) is the designated next experiment.
