@@ -331,3 +331,36 @@ state-of-the-art band (~0.90+).** The honest headline: a subtractive-reset
 LIF network with exact linear sub-threshold dynamics, hand-rolled BPTT,
 and a count readout reaches **0.88 ± noise** on SHD with ~2.5 h of
 single-thread laptop training.
+
+## Round 6 — learned time constants (pre-registered: docs/14) — **NULL**
+
+First round under the improvements.md discipline: protocol committed and
+pushed before the runs (docs/14), 3 seeds per arm as the default, and the
+new `--threads 16` data-parallel trainer (~9× wall-clock; deterministic per
+thread count, not bit-identical to the serial path — all arms share the
+mode). Library support: backprop into the closed-form propagator entries
+(`lif_entry_grads`, FD-gated), `KoopmanLayer::lif_hetero` (bit-identical to
+fixed τ at the uniform 20/10 start), log-space per-neuron τ under the shared
+Adam with clamps. Raw log: `sweep-AG-AH-X-log.txt`.
+
+| run | seed 0 | seed 100 | seed 200 | mean ± half-range |
+|---|---|---|---|---|
+| X (fixed τ, control) | 0.8884 | 0.8638 | 0.8165 | **0.8563 ± 0.0359** |
+| AG (X + learned τ) | 0.8737 | 0.8272 | 0.8268 | **0.8426 ± 0.0234** |
+| AH (R + learned τ) | 0.8696 | 0.8549 | 0.8384 | **0.8543 ± 0.0156** |
+
+- **Verdict (frozen rule): NULL** — mean(AG) − mean(X) = −0.0137, inside
+  ±0.015. The mechanism engaged hard (layer-0 τ_m means ran from 20 to
+  64–82 ms, distributions spanning the whole [5, 100] ms clamp), so the
+  feature works and simply doesn't pay here: training loss dropped at or
+  below the control's while test accuracy didn't move. Full analysis and
+  scorecard: docs/15.
+- **The two-layer recipe's seed band is ±3.6 points** (X: 0.8165–0.8884) —
+  wider than round 5's ±2.7 on one layer. Round 4's X = 0.8857 was a
+  favorable draw (its seed-0 re-run reproduces it at 0.8884); the recipe's
+  honest value is ≈ 0.856.
+- **Second leaderboard feature that fails to transfer as an isolated
+  add-on** (after round 4's adaptation): the gap to 0.90+ increasingly looks
+  carried by readout × time-resolution jointly, not neuron-model features.
+  Next per the re-ranked roadmap: a trained temporal readout, then the
+  combination experiment (learned τ × 5 ms bins × that readout).

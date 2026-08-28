@@ -16,32 +16,33 @@ ensemble, and margins under ~3 points are reported as inconclusive.
 
 ## P0 — Methodology debt (cheap; do before any new experiment)
 
-1. **Hash-verifiable pre-registration.** Commit each new protocol in its own
-   commit *before* the results commit, so protocol-before-results ordering no
-   longer rests on documents' internal dating. Flagged as the record's one
-   weak point in `README.md` and the paper's limitations.
-2. **Multi-seed reporting as the default.** Bake the ≥ 3-seed rule into the
-   harness workflow (a `--seeds N` convenience over `seed_bump`) and report
-   mean ± spread in every `RESULT` line. The machinery exists; make it the
-   path of least resistance.
+1. **Hash-verifiable pre-registration.** ✅ *Adopted 2026-08-27: the
+   learned-τ protocol (`docs/14`) was committed and pushed before its runs.*
+   Commit each new protocol in its own commit *before* the results commit,
+   so protocol-before-results ordering no longer rests on documents'
+   internal dating. Flagged as the record's one weak point in `README.md`
+   and the paper's limitations.
+2. **Multi-seed reporting as the default.** ✅ *Done 2026-08-27:
+   `shd_sweep --seeds N` runs seed_bump offsets 0/100/200/… and prints an
+   AGGREGATE mean ± half-range line per tag.*
 
 ## P1 — Accuracy on SHD (closing ~3.5 points to the 0.90–0.94 band)
 
-1. **Learned per-neuron time constants — the highest-value single feature.**
-   Backpropagate into the propagator entries: α, β, γ are closed-form
-   functions of (τ_m, τ_s, h), so ∂α/∂τ etc. are analytic and the exact
-   formulation makes this unusually clean. Rationale from the record:
-   - The published 0.90+ results learn τ; ours are fixed at 20/10 ms.
-   - Round 4's ALIF *negative* result (homogeneous −3.7 pts) is expected to
-     flip once τ is learned — published ALIF wins come bundled with it.
-   - Composes with 5 ms bins (AB: 0.871 at 2× cost with *fixed* τ).
-   First experiment: two-layer recipe (X) + learnable τ, 3 seeds.
-2. **A trained temporal readout that *adds* memory.** The count readout is
-   load-bearing (recency-weighting collapsed accuracy 14 pts, tag AC), so any
-   replacement must extend it, not discard it. Candidate: learned per-bin
-   attention weights over the spike-count trace, initialized uniform — the
-   same "grow from the identity" trick that made recurrence work from
-   zero-init (tag L).
+1. **A trained temporal readout that *adds* memory — now the top item.**
+   The count readout is load-bearing (recency-weighting collapsed accuracy
+   14 pts, tag AC), so any replacement must extend it, not discard it.
+   Candidate: learned per-bin attention weights over the spike-count trace,
+   initialized uniform — the same "grow from the identity" trick that made
+   recurrence work from zero-init (tag L). Promoted after the learned-τ
+   null: two neuron-model features in a row (adaptation, τ) failed to
+   transfer alone, pointing at the readout as the binding constraint.
+2. **Learned per-neuron time constants.** ⚪ *Run 2026-08-27 — NULL*
+   (pre-registered docs/14, results docs/15): mean(AG) − mean(X) = −0.0137
+   over 3 seeds, inside the ±0.015 band, with the mechanism strongly engaged
+   (τ distributions spread across the full clamp range). Implementation
+   ships in the library (`learn_tau`, inert when off). Retry **only in
+   combination**: learned τ × 5 ms bins × trained temporal readout — the
+   configuration where the published wins actually live.
 3. **Augmentation variety, not volume.** The budget ceiling is real: 12,000
    minibatches overfit even with current augmentation (tag U). New
    corruptions to try cheaply in the harness: channel dropout, additive spike
@@ -56,11 +57,11 @@ ensemble, and margins under ~3 points are reported as inconclusive.
 
 ## P2 — Library engineering
 
-1. **Parallelism.** Everything to date is single-threaded. Two rungs:
-   batch-level threading (easy, immediate ~core-count speedup for every P1
-   experiment), then parallel-in-time training via the linear-state-space
-   form — the same trick the spiking-SSM literature (PSN et al.) exploits,
-   and this architecture's natural birthright.
+1. **Parallelism.** *Batch-level threading done 2026-08-27
+   (`TrainConfig::threads` / `--threads N`): ~9× on the R recipe at 16
+   threads (38 steps/s vs 4.1 serial); threads = 1 stays the bit-exact
+   recorded path. Parallel-in-time training via the linear-state-space form
+   (the spiking-SSM trick) remains open.*
 2. **adLIF fast-path integration test.** The closed-form structure is shared
    but the fast path has no spike-for-spike integration gate yet
    (`README.md` claims table). Required before any learned-τ ALIF result is
