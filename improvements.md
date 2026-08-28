@@ -78,18 +78,30 @@ the paper revision (draft still ends at round 5's 0.88).
 
 ## P2 — Library engineering
 
-1. **Parallelism.** *Batch-level threading done 2026-08-27
-   (`TrainConfig::threads` / `--threads N`): ~9× on the R recipe at 16
-   threads (38 steps/s vs 4.1 serial); threads = 1 stays the bit-exact
-   recorded path. Parallel-in-time training via the linear-state-space form
-   (the spiking-SSM trick) remains open.*
-2. **adLIF fast-path integration test.** The closed-form structure is shared
-   but the fast path has no spike-for-spike integration gate yet
-   (`README.md` claims table). Required before any learned-τ ALIF result is
-   trusted.
-3. **snnTorch baseline.** External calibration point recommended in
-   `docs/10`; run the same SHD protocol on a mainstream framework to anchor
-   our numbers.
+1. **Parallelism.** ✅ *CLOSED 2026-08-28 (docs/24).* Batch threading
+   shipped 2026-08-27 (~9× at 16 threads; threads = 1 stays the bit-exact
+   recorded path). Parallel-in-time is **structurally unavailable** for
+   this model class: reset-as-control (plus recurrence and the attention
+   readout) closes the state→threshold→input loop every step — the same
+   structure that gives exactness forces sequentiality. The reset-free
+   "PSN-mode" alternative is documented and deferred behind a registration
+   requirement (docs/24 §4).
+2. **adLIF fast-path integration test.** ✅ *CLOSED 2026-08-28.* The README
+   claim was stale (800-step spike-for-spike reference gates existed); the
+   genuine gap — the batched training path — is now gated
+   (`adlif_sparse_and_batch_paths_agree`) and the claims table corrected.
+3. **snnTorch baseline.** ✅ *CLOSED 2026-08-28* (`baselines/README.md`):
+   direct transplant 0.60–0.76 (below the pre-stated 0.80–0.88 band — the
+   miss is recorded), gain-corrected diagnostic 0.73–0.84. Calibration
+   conclusions: the protocol transfers (our numbers aren't a harness
+   artifact); hyperparameters do NOT transfer across sub-threshold
+   integrator conventions (RSynaptic's coupling gain 1.0 vs the exact γ =
+   0.239 — the sensitivity the exact propagator exists to remove); and no
+   claim of engine superiority is made (home-field tuning advantage
+   disclosed).
+
+**P2 status: CONCLUDED (2026-08-28).** All three items closed (docs/24,
+the adLIF gate, `baselines/`).
 
 ## P3 — Science: identification and the Koopman side
 

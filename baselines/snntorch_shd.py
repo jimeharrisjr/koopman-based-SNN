@@ -38,6 +38,11 @@ import snntorch as snn
 from snntorch import surrogate
 
 SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 42
+# Optional input-gain scale (post-hoc diagnostic, see results note):
+# RSynaptic couples syn into mem with gain 1.0/step where the exact
+# propagator's gamma = 0.239, so the transplanted init over-drives
+# snnTorch ~4x. GAIN=0.25 roughly compensates.
+GAIN = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 N_POOLED = 350
 T_STEPS = 100
 BIN_S = 0.010
@@ -96,7 +101,7 @@ class Net(nn.Module):
         self.fc_in = nn.Linear(N_POOLED, N_HIDDEN, bias=False)
         # Harness init: U(0, 35/fan_in) for the input layer.
         with torch.no_grad():
-            self.fc_in.weight.uniform_(0.0, 35.0 / N_POOLED)
+            self.fc_in.weight.uniform_(0.0, GAIN * 35.0 / N_POOLED)
         self.lif = snn.RSynaptic(
             alpha=alpha,
             beta=beta,
@@ -171,7 +176,7 @@ def main():
             correct += int((pred == ys).sum())
             total += BATCH
     print(
-        f"RESULT [snntorch-R seed {SEED}]: test accuracy {correct / total:.4f} "
+        f"RESULT [snntorch-R seed {SEED} gain {GAIN}]: test accuracy {correct / total:.4f} "
         f"({correct}/{total}), train {train_secs:.1f}s"
     )
 
