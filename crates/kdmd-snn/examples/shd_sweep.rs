@@ -67,6 +67,11 @@ struct ExpConfig {
     /// Temporal readout under test (docs/16 pre-registration). Both trained
     /// modes initialize as exactly the count readout.
     readout: TemporalReadout,
+    /// Augmentation VARIETY on top of the standard three corruptions
+    /// (docs/20): SpecAugment-style channel-block dropout and time masking,
+    /// plus additive noise events. Strengths are fixed constants below,
+    /// chosen a priori and untuned.
+    augment_extra: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -110,6 +115,7 @@ const BASE: ExpConfig = ExpConfig {
     ensemble: 1,
     learn_tau: false,
     readout: TemporalReadout::Count,
+    augment_extra: false,
 };
 
 /// Adaptation defaults for the ALIF rounds (dt = 10 ms bins): τ_w = 150 ms
@@ -122,6 +128,14 @@ const ALIF_B_JUMP: f64 = 0.1;
 const AUG_EVENT_DROP: f64 = 0.15;
 const AUG_CHANNEL_SHIFT: i32 = 25; // uniform in [−25, 25] of 700 channels
 const AUG_STRETCH: (f64, f64) = (0.9, 1.1); // uniform time-stretch factor
+
+/// Extra-variety strengths (docs/20; a priori, untuned). Each corruption
+/// fires independently per presentation with probability 0.5.
+const XAUG_APPLY_P: f64 = 0.5;
+const XAUG_CHANNEL_BLOCK_MAX: u32 = 70; // contiguous channels masked (of 700)
+const XAUG_TIME_MASK_MAX_S: f64 = 0.10; // contiguous seconds masked
+const XAUG_NOISE_RATE: f64 = 0.02; // spurious events per kept event
+const XAUG_HORIZON_S: f64 = 1.0; // noise-event time range
 
 const EXPERIMENTS: &[ExpConfig] = &[
     ExpConfig {
@@ -504,15 +518,65 @@ const EXPERIMENTS: &[ExpConfig] = &[
         t_steps: 200,
         ..BASE
     },
+    // Round 9 (docs/20): building on the AK default recipe.
+    ExpConfig {
+        tag: "AM",
+        name: "AK recipe + augmentation variety (channel block, time mask, noise)",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        augment_extra: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "AN",
+        name: "ensemble x3 of the AK recipe, summed logits",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        ensemble: 3,
+        ..BASE
+    },
 ];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
 /// whole-sample channel shift (spectral jitter), and a whole-sample time
 /// stretch. Events pushed outside [0, 700) channels are dropped; times
 /// outside the horizon are handled by binning's range check.
-fn augment_sample(sample: &ShdSample, rng: &mut StdRng) -> ShdSample {
+fn augment_sample(sample: &ShdSample, rng: &mut StdRng, extra: bool) -> ShdSample {
     let shift = rng.random_range(-AUG_CHANNEL_SHIFT..=AUG_CHANNEL_SHIFT);
     let stretch = rng.random_range(AUG_STRETCH.0..AUG_STRETCH.1);
+    // Extra-variety corruptions (docs/20), decided per presentation. Each
+    // draw happens unconditionally so the RNG stream stays aligned whether
+    // or not a corruption fires.
+    let (ch_block, t_mask, noise) = if extra {
+        let ch = (rng.random::<f64>() < XAUG_APPLY_P).then(|| {
+            let width = rng.random_range(1..=XAUG_CHANNEL_BLOCK_MAX);
+            let start = rng.random_range(0..(700 - width));
+            (start, start + width)
+        });
+        let tm = (rng.random::<f64>() < XAUG_APPLY_P).then(|| {
+            let width = rng.random_range(0.0..XAUG_TIME_MASK_MAX_S);
+            let start = rng.random_range(0.0..XAUG_HORIZON_S);
+            (start, start + width)
+        });
+        let nz = rng.random::<f64>() < XAUG_APPLY_P;
+        (ch, tm, nz)
+    } else {
+        (None, None, false)
+    };
     let mut times = Vec::with_capacity(sample.times_s.len());
     let mut units = Vec::with_capacity(sample.units.len());
     for (&t, &u) in sample.times_s.iter().zip(&sample.units) {
@@ -523,8 +587,26 @@ fn augment_sample(sample: &ShdSample, rng: &mut StdRng) -> ShdSample {
         if !(0..700).contains(&shifted) {
             continue;
         }
-        times.push(t * stretch);
+        let t2 = t * stretch;
+        if let Some((lo, hi)) = ch_block {
+            if (lo..hi).contains(&(shifted as u32)) {
+                continue;
+            }
+        }
+        if let Some((lo, hi)) = t_mask {
+            if (lo..hi).contains(&t2) {
+                continue;
+            }
+        }
+        times.push(t2);
         units.push(shifted as u32);
+    }
+    if noise {
+        let n_add = ((times.len() as f64) * XAUG_NOISE_RATE).ceil() as usize;
+        for _ in 0..n_add {
+            times.push(rng.random_range(0.0..XAUG_HORIZON_S));
+            units.push(rng.random_range(0..700u32));
+        }
     }
     ShdSample {
         times_s: times,
@@ -714,7 +796,7 @@ fn run_experiment(
                 };
                 targets.push(sample.label);
                 if cfg.augment {
-                    let augmented = augment_sample(sample, &mut data_rng);
+                    let augmented = augment_sample(sample, &mut data_rng, cfg.augment_extra);
                     write_sample(&augmented, &mut inputs, b, cfg).unwrap();
                 } else {
                     write_sample(sample, &mut inputs, b, cfg).unwrap();
