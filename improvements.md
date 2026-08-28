@@ -36,6 +36,10 @@ ensemble, and margins under ~3 points are reported as inconclusive.
    recurrence work from zero-init (tag L). Promoted after the learned-τ
    null: two neuron-model features in a row (adaptation, τ) failed to
    transfer alone, pointing at the readout as the binding constraint.
+   ✦ *Implemented and pre-registered 2026-08-27 (`docs/16`): two arms —
+   AI (learned static per-bin profile) and AJ (spike-driven softmax
+   attention), both identity-initialized and test-gated; control = round-6
+   X 3-seed arm. Awaiting the registered runs.*
 2. **Learned per-neuron time constants.** ⚪ *Run 2026-08-27 — NULL*
    (pre-registered docs/14, results docs/15): mean(AG) − mean(X) = −0.0137
    over 3 seeds, inside the ±0.015 band, with the mechanism strongly engaged
