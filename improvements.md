@@ -39,6 +39,11 @@ ensemble, and margins under ~3 points are reported as inconclusive.
    r7), the standing attribution is that the ~4-point gap to 0.90+ lives in
    joint interactions. One registered round combining the engaged-but-null
    features is the designated test of that attribution.
+   ✦ *Designed and pre-registered 2026-08-27 (`docs/18`): AK (the full
+   combination) and AL (5 ms bins alone — the missing single-axis cell) on
+   the X recipe, 3 seeds each; frozen additivity formula separates
+   interaction from accumulation; composition test-gated. Awaiting the
+   registered runs.*
 3. **A trained temporal readout.** ⚫ *Run 2026-08-27 — AI NEGATIVE
    (−2.0), AJ NULL (+0.3)* (pre-registered docs/16, results docs/17). Both
    mechanisms engaged; a learned static profile is actively harmful, and
