@@ -411,6 +411,179 @@ fn threaded_training_learns_the_task() {
 }
 
 #[test]
+fn uniform_lif_hetero_matches_homogeneous_lif_exactly() {
+    // The learnable-τ layer at its uniform starting point must be the fixed-τ
+    // layer, spike for spike and bit for bit — so a learnable-τ run starts
+    // exactly at the baseline it is compared against.
+    let lif = Lif::new(LifParams {
+        tau_m: 20.0,
+        tau_s: 10.0,
+        dt: 10.0,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let n = 12;
+    let mut rng = StdRng::seed_from_u64(97);
+    let w = Mat::from_fn(n, N_IN, |_, _| rng.random_range(0.0..0.8));
+    let mut homo = KoopmanLayer::lif(&lif, n, w.clone(), BATCH).unwrap();
+    let mut hetero =
+        KoopmanLayer::lif_hetero(&vec![20.0; n], &vec![10.0; n], 1.0, 10.0, 1.0, w, BATCH)
+            .unwrap();
+    let mut net_a = Network::new(vec![homo.clone_with_batch(BATCH).unwrap()], BATCH).unwrap();
+    let mut net_b = Network::new(vec![hetero.clone_with_batch(BATCH).unwrap()], BATCH).unwrap();
+    let _ = (&mut homo, &mut hetero);
+
+    let mut rng = StdRng::seed_from_u64(11);
+    for t in 0..300 {
+        let mut s_in = SpikeBatch::zeros(N_IN, BATCH).unwrap();
+        for b in 0..BATCH {
+            for i in 0..N_IN {
+                if rng.random::<f64>() < 0.15 {
+                    s_in.as_mat_mut()[(i, b)] = 1.0;
+                }
+            }
+        }
+        let sa = net_a.step_batch(&s_in).unwrap().as_mat().to_owned();
+        let sb = net_b.step_batch(&s_in).unwrap().as_mat();
+        for b in 0..BATCH {
+            for i in 0..n {
+                assert_eq!(sa[(i, b)], sb[(i, b)], "spikes diverged at step {t}");
+            }
+        }
+        for i in 0..2 * n {
+            for b in 0..BATCH {
+                assert_eq!(
+                    net_a.state(0).as_mat()[(i, b)],
+                    net_b.state(0).as_mat()[(i, b)],
+                    "state diverged at step {t}, row {i}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn learn_tau_off_leaves_hetero_training_identical_to_fixed() {
+    // With learn_tau disabled, training a uniform lif_hetero network must
+    // produce exactly the fixed-τ network's updates (the τ machinery is
+    // provably inert when off).
+    let lif = Lif::new(LifParams {
+        tau_m: 20.0,
+        tau_s: 10.0,
+        dt: DT,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let mut rng = StdRng::seed_from_u64(23);
+    let w = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+    let fixed = KoopmanLayer::lif(&lif, N_HIDDEN, w.clone(), BATCH).unwrap();
+    let hetero = KoopmanLayer::lif_hetero(
+        &vec![20.0; N_HIDDEN],
+        &vec![10.0; N_HIDDEN],
+        1.0,
+        DT,
+        1.0,
+        w,
+        BATCH,
+    )
+    .unwrap();
+    let mut net_a = Network::new(vec![fixed], BATCH).unwrap();
+    let mut net_b = Network::new(vec![hetero], BATCH).unwrap();
+    let mut tr_a = Trainer::new(&net_a, N_CLASSES, TrainConfig::default()).unwrap();
+    let mut tr_b = Trainer::new(&net_b, N_CLASSES, TrainConfig::default()).unwrap();
+
+    let mut rng = StdRng::seed_from_u64(29);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    for _ in 0..5 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let sa = tr_a.train_step(&mut net_a, &inputs, &targets).unwrap();
+        let sb = tr_b.train_step(&mut net_b, &inputs, &targets).unwrap();
+        assert_eq!(sa.loss, sb.loss, "losses diverged");
+    }
+    let wa = net_a.layer(0).weights();
+    let wb = net_b.layer(0).weights();
+    for j in 0..wa.ncols() {
+        for i in 0..wa.nrows() {
+            assert_eq!(wa[(i, j)], wb[(i, j)], "weights diverged at ({i},{j})");
+        }
+    }
+}
+
+#[test]
+fn learn_tau_trains_and_moves_the_time_constants() {
+    // End-to-end learnable τ: training must stay finite, reduce the loss,
+    // actually move the time constants off their uniform start, and respect
+    // the clamp region.
+    let mut rng = StdRng::seed_from_u64(43);
+    let w = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+    let layer = KoopmanLayer::lif_hetero(
+        &vec![20.0; N_HIDDEN],
+        &vec![10.0; N_HIDDEN],
+        1.0,
+        DT,
+        1.0,
+        w,
+        BATCH,
+    )
+    .unwrap()
+    .with_recurrent(Mat::zeros(N_HIDDEN, N_HIDDEN))
+    .unwrap();
+    let mut net = Network::new(vec![layer], BATCH).unwrap();
+    let mut trainer = Trainer::new(
+        &net,
+        N_CLASSES,
+        TrainConfig {
+            learn_tau: true,
+            threads: 2,
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let mut losses = Vec::new();
+    for step in 0..200 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.7 * early,
+        "learnable-τ training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+    let meta = net.layer(0).lif_taus().expect("τ metadata");
+    let mut moved = 0.0f64;
+    for j in 0..N_HIDDEN {
+        moved = moved
+            .max((meta.taus_m[j] - 20.0).abs())
+            .max((meta.taus_s[j] - 10.0).abs());
+        assert!(
+            (5.0..=100.0).contains(&meta.taus_m[j]),
+            "tau_m[{j}] = {} escaped its clamp",
+            meta.taus_m[j]
+        );
+        assert!(
+            (2.0..=50.0).contains(&meta.taus_s[j]),
+            "tau_s[{j}] = {} escaped its clamp",
+            meta.taus_s[j]
+        );
+        assert!(
+            meta.taus_m[j] >= 1.2 * meta.taus_s[j] - 1e-9,
+            "separation violated at neuron {j}: {} vs {}",
+            meta.taus_m[j],
+            meta.taus_s[j]
+        );
+    }
+    assert!(
+        moved > 0.05,
+        "time constants never moved off the uniform start (max |Δτ| = {moved:.4} ms)"
+    );
+}
+
+#[test]
 fn surrogate_bptt_learns_the_poisson_pattern_task() {
     let mut rng = StdRng::seed_from_u64(17);
     // Two random rate patterns over 24 channels: 0.12 spikes/ms on active

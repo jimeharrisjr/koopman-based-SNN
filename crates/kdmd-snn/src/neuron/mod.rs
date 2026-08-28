@@ -17,7 +17,7 @@ use crate::state::LayerState;
 
 pub use adlif::{AdLif, AdLifParams};
 pub use izhikevich::{Izhikevich, IzhikevichParams};
-pub use lif::{Lif, LifParams};
+pub use lif::{lif_entry_grads, Lif, LifParams};
 
 /// What happens to the membrane potential when a neuron fires.
 #[derive(Debug, Clone, Copy, PartialEq)]

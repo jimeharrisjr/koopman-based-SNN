@@ -59,6 +59,11 @@ struct ExpConfig {
     /// Number of independently seeded members trained; evaluation sums their
     /// logits (1 = a single model).
     ensemble: usize,
+    /// Learn per-neuron time constants (LIF only): layers start at the
+    /// uniform 20/10 ms baseline — exactly the fixed-τ network at step 0 —
+    /// and training moves each neuron's τ_m/τ_s by backprop through the
+    /// propagator entries (docs/14 pre-registration).
+    learn_tau: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -90,6 +95,7 @@ const BASE: ExpConfig = ExpConfig {
     t_steps: T_STEPS,
     readout_decay: None,
     ensemble: 1,
+    learn_tau: false,
 };
 
 /// Adaptation defaults for the ALIF rounds (dt = 10 ms bins): τ_w = 150 ms
@@ -409,6 +415,30 @@ const EXPERIMENTS: &[ExpConfig] = &[
         ensemble: 3,
         ..BASE
     },
+    // Learned time constants (improvements.md P1.1; protocol: docs/14).
+    // AG = the X recipe + learnable τ; AH = the R recipe + learnable τ.
+    ExpConfig {
+        tag: "AG",
+        name: "X recipe + learnable tau (two recurrent layers 256-256)",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "AH",
+        name: "R recipe + learnable tau (one recurrent layer 256)",
+        n_pooled: 350,
+        hidden: &[256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        ..BASE
+    },
 ];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
@@ -479,6 +509,21 @@ fn build_network(cfg: &ExpConfig, seed_bump: u64) -> Network {
         let gain = numerator / fan_in as f64;
         let w = Mat::from_fn(n, fan_in, |_, _| rng.random_range(0.0..gain));
         let mut layer = match cfg.neuron {
+            NeuronKind::Lif if cfg.learn_tau => {
+                // Uniform 20/10 ms start: bitwise the fixed-τ layer at step 0
+                // (test-gated), so any difference is attributable to training
+                // the time constants.
+                KoopmanLayer::lif_hetero(
+                    &vec![20.0; n],
+                    &vec![10.0; n],
+                    1.0,
+                    dt_ms,
+                    1.0,
+                    w,
+                    BATCH,
+                )
+                .unwrap()
+            }
             NeuronKind::Lif => KoopmanLayer::lif(&lif, n, w, BATCH).unwrap(),
             NeuronKind::Alif => {
                 let cell = AdLif::new(AdLifParams {
@@ -571,6 +616,7 @@ fn run_experiment(
                 weight_decay: cfg.weight_decay,
                 readout_decay: cfg.readout_decay,
                 threads,
+                learn_tau: cfg.learn_tau,
                 ..TrainConfig::default()
             },
         )
@@ -611,6 +657,25 @@ fn run_experiment(
                     println!("  step {:4}: mean loss {mean:.4}", step + 1);
                 }
                 recent.clear();
+            }
+        }
+        // Learned-τ summary: where did training move the time constants?
+        if cfg.learn_tau {
+            for (l, taus) in trainer.taus(&net).iter().enumerate() {
+                if let Some((tm, ts)) = taus {
+                    let stats = |v: &[f64]| {
+                        let mean = v.iter().sum::<f64>() / v.len() as f64;
+                        let lo = v.iter().cloned().fold(f64::MAX, f64::min);
+                        let hi = v.iter().cloned().fold(f64::MIN, f64::max);
+                        (mean, lo, hi)
+                    };
+                    let (mm, ml, mh) = stats(tm);
+                    let (sm, sl, sh) = stats(ts);
+                    println!(
+                        "  taus layer {l}: tau_m mean {mm:.2} [{ml:.2}, {mh:.2}], \
+                         tau_s mean {sm:.2} [{sl:.2}, {sh:.2}] ms"
+                    );
+                }
             }
         }
         members.push((net, trainer));

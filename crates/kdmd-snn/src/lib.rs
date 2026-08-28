@@ -49,7 +49,7 @@ pub use identify::{
     fit_autonomous, fit_controlled, lif_structural_b, IdentifiedControlled, IdentifiedOperator,
     IdentifyConfig, RankPolicy,
 };
-pub use layer::KoopmanLayer;
+pub use layer::{KoopmanLayer, LifTauMeta};
 pub use network::Network;
 pub use neuron::{
     AdLif, AdLifParams, Izhikevich, IzhikevichParams, Lif, LifParams, NeuronModel, ResetMode,

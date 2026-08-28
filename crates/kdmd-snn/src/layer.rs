@@ -31,6 +31,17 @@ use crate::spikes::{SpikeBatch, SpikeVec};
 use crate::state::LayerState;
 use crate::util;
 
+/// Per-neuron LIF time constants carried by a learnable-τ layer
+/// (improvements.md P1.1): the trainer reads them for the chain rule and
+/// writes updates back through [`KoopmanLayer::set_lif_taus`].
+#[derive(Debug, Clone)]
+pub struct LifTauMeta {
+    pub taus_m: Vec<f64>,
+    pub taus_s: Vec<f64>,
+    pub r: f64,
+    pub dt: f64,
+}
+
 /// A fast-path layer: identified/closed-form `A`, synaptic weights `W`,
 /// per-variable input coupling, subtractive threshold.
 #[derive(Debug, Clone)]
@@ -57,6 +68,9 @@ pub struct KoopmanLayer {
     coupling_override: Option<Mat<f64>>,
     n_neurons: usize,
     n_state_vars: usize,
+    /// Per-neuron LIF time constants, present only on layers built by
+    /// [`lif_hetero`](Self::lif_hetero) — the learnable-τ handle.
+    lif_tau: Option<LifTauMeta>,
     /// Optional recurrent weights (`n_neurons × n_neurons`): the layer's own
     /// spikes from the **previous** step feed back into the drive.
     w_rec: Option<Mat<f64>>,
@@ -149,6 +163,7 @@ impl KoopmanLayer {
             coupling_override: None,
             n_neurons,
             n_state_vars,
+            lif_tau: None,
             w_rec: None,
             prev_spikes: Mat::zeros(n_neurons, batch),
             y: Mat::zeros(dim, batch),
@@ -298,6 +313,133 @@ impl KoopmanLayer {
         };
         Self::new(a, w_in, adlif.b_local().to_vec(), theta, batch)?
             .with_jumps(vec![-theta, 0.0, b_jump])
+    }
+
+    /// Heterogeneous (and learnable-τ-capable) plain-LIF layer: per-neuron
+    /// membrane and synaptic time constants with shared threshold, using
+    /// [`Operator::PerNeuron`] blocks plus a per-neuron coupling override.
+    /// With uniform time constants this layer is arithmetic-for-arithmetic
+    /// identical to [`lif`](Self::lif) (test-gated), so a learnable-τ run
+    /// starts exactly at the fixed-τ baseline. The trainer updates the time
+    /// constants through [`set_lif_taus`](Self::set_lif_taus).
+    ///
+    /// Requires `τ_m` and `τ_s` separated by ≥ 5% per neuron (the learnable-τ
+    /// gradient formulas need headroom from the degenerate limit; the
+    /// trainer's clamp preserves this invariant during training).
+    pub fn lif_hetero(
+        taus_m: &[f64],
+        taus_s: &[f64],
+        r: f64,
+        dt: f64,
+        theta: f64,
+        w_in: Mat<f64>,
+        batch: usize,
+    ) -> Result<Self, SnnError> {
+        let n = taus_m.len();
+        if n == 0 || taus_s.len() != n {
+            return Err(SnnError::DimensionMismatch(format!(
+                "{} tau_m entries vs {} tau_s entries",
+                n,
+                taus_s.len()
+            )));
+        }
+        let (blocks, coupling) = Self::lif_blocks(taus_m, taus_s, r, dt, theta)?;
+        let a = Operator::PerNeuron {
+            blocks,
+            n_state_vars: 2,
+        };
+        let mut layer = Self::new(a, w_in, vec![0.0; 2], theta, batch)?.with_coupling(coupling)?;
+        layer.lif_tau = Some(LifTauMeta {
+            taus_m: taus_m.to_vec(),
+            taus_s: taus_s.to_vec(),
+            r,
+            dt,
+        });
+        Ok(layer)
+    }
+
+    /// Per-neuron LIF propagator blocks and coupling from time constants,
+    /// computed through the same [`Lif`] constructor as the homogeneous fast
+    /// path (bitwise-identical entries).
+    fn lif_blocks(
+        taus_m: &[f64],
+        taus_s: &[f64],
+        r: f64,
+        dt: f64,
+        theta: f64,
+    ) -> Result<(Mat<f64>, Mat<f64>), SnnError> {
+        let n = taus_m.len();
+        let mut blocks = Mat::<f64>::zeros(4, n);
+        let mut coupling = Mat::<f64>::zeros(2, n);
+        for j in 0..n {
+            if (taus_m[j] - taus_s[j]).abs() <= 0.05 * taus_m[j].max(taus_s[j]) {
+                return Err(SnnError::InvalidParameter(format!(
+                    "neuron {j}: tau_m = {} and tau_s = {} are within 5% — the \
+                     learnable-τ layer requires separated time constants",
+                    taus_m[j], taus_s[j]
+                )));
+            }
+            let cell = crate::neuron::Lif::new(crate::neuron::LifParams {
+                tau_m: taus_m[j],
+                tau_s: taus_s[j],
+                r,
+                v_rest: 0.0,
+                theta,
+                dt,
+                reset: crate::neuron::ResetMode::Subtractive,
+            })?;
+            let a_local = cell.a_local();
+            for p in 0..2 {
+                for q in 0..2 {
+                    blocks[(p * 2 + q, j)] = a_local[(p, q)];
+                }
+            }
+            let b = cell.b_local();
+            coupling[(0, j)] = b[0];
+            coupling[(1, j)] = b[1];
+        }
+        Ok((blocks, coupling))
+    }
+
+    /// Write updated per-neuron time constants into a [`lif_hetero`]
+    /// (Self::lif_hetero) layer: rebuilds the propagator blocks and coupling
+    /// in place. Errors on layers without LIF-τ metadata or on length
+    /// mismatch.
+    pub fn set_lif_taus(&mut self, taus_m: &[f64], taus_s: &[f64]) -> Result<(), SnnError> {
+        let meta = self.lif_tau.as_ref().ok_or_else(|| {
+            SnnError::InvalidParameter("set_lif_taus: layer has no LIF-τ metadata".into())
+        })?;
+        if taus_m.len() != self.n_neurons || taus_s.len() != self.n_neurons {
+            return Err(SnnError::DimensionMismatch(format!(
+                "{}/{} tau entries for {} neurons",
+                taus_m.len(),
+                taus_s.len(),
+                self.n_neurons
+            )));
+        }
+        let (r, dt) = (meta.r, meta.dt);
+        let (blocks, coupling) = Self::lif_blocks(taus_m, taus_s, r, dt, self.theta)?;
+        self.a = Operator::PerNeuron {
+            blocks,
+            n_state_vars: 2,
+        };
+        self.coupling_override = Some(coupling);
+        let meta = self.lif_tau.as_mut().unwrap();
+        meta.taus_m.copy_from_slice(taus_m);
+        meta.taus_s.copy_from_slice(taus_s);
+        Ok(())
+    }
+
+    /// LIF time-constant metadata, present on learnable-τ layers.
+    pub fn lif_taus(&self) -> Option<&LifTauMeta> {
+        self.lif_tau.as_ref()
+    }
+
+    /// The drive `d = W·s_in (+ W_rec·s_own)` computed by the most recent
+    /// step (`n_neurons × batch` scratch — valid only after a step; the
+    /// learnable-τ tape copies it out per step).
+    pub fn drive(&self) -> faer::MatRef<'_, f64> {
+        self.drive.as_ref()
     }
 
     /// Heterogeneous adaptive-LIF layer: per-neuron time constants (one

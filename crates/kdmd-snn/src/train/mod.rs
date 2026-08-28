@@ -66,7 +66,20 @@ pub struct TrainConfig {
     /// ~1e-15 per step, which can drift across a long run the way any seed
     /// perturbation does).
     pub threads: usize,
+    /// Learn per-neuron LIF time constants (improvements.md P1.1): layers
+    /// built with [`KoopmanLayer::lif_hetero`](crate::KoopmanLayer::lif_hetero)
+    /// get their τ_m/τ_s trained by backprop through the closed-form
+    /// propagator entries (α, β, γ, δ, 1−β are analytic functions of τ).
+    /// Parameters are learned in log-space (scale-free) under the same
+    /// optimizer, then clamped to τ_m ∈ [5, 100] ms, τ_s ∈ [2, 50] ms with
+    /// τ_m ≥ 1.2·τ_s (keeps the γ formulas away from the degenerate limit).
+    pub learn_tau: bool,
 }
+
+/// Learnable-τ clamp bounds (ms) — see [`TrainConfig::learn_tau`].
+const TAU_M_RANGE: (f64, f64) = (5.0, 100.0);
+const TAU_S_RANGE: (f64, f64) = (2.0, 50.0);
+const TAU_SEPARATION: f64 = 1.2;
 
 impl Default for TrainConfig {
     fn default() -> Self {
@@ -82,6 +95,7 @@ impl Default for TrainConfig {
             weight_decay: 0.0,
             readout_decay: None,
             threads: 1,
+            learn_tau: false,
         }
     }
 }
@@ -94,6 +108,11 @@ struct BatchGrads {
     w: Vec<Mat<f64>>,
     rec: Vec<Option<Mat<f64>>>,
     r: Mat<f64>,
+    /// Per-layer propagator-entry gradients for learnable τ (`5 × n`, rows
+    /// ordered `[α, β, γ, δ, b₂]` to match `lif_entry_grads`); `None` for
+    /// layers without τ metadata or when `learn_tau` is off. The chain rule
+    /// to τ itself is applied once, at update time.
+    tau: Vec<Option<Mat<f64>>>,
     /// Unnormalized Σ_b per-sample loss.
     loss_sum: f64,
     correct: usize,
@@ -109,6 +128,15 @@ impl BatchGrads {
             }
         }
         for (a, b) in self.rec.iter_mut().zip(&other.rec) {
+            if let (Some(a), Some(b)) = (a.as_mut(), b.as_ref()) {
+                for c in 0..a.ncols() {
+                    for i in 0..a.nrows() {
+                        a[(i, c)] += b[(i, c)];
+                    }
+                }
+            }
+        }
+        for (a, b) in self.tau.iter_mut().zip(&other.tau) {
             if let (Some(a), Some(b)) = (a.as_mut(), b.as_ref()) {
                 for c in 0..a.ncols() {
                     for i in 0..a.nrows() {
@@ -145,6 +173,10 @@ pub struct Trainer {
     /// Optimizer state for recurrent weights, per layer (None = feedforward).
     opt_rec: Vec<Option<Adam>>,
     opt_r: Adam,
+    /// Learnable-τ parameters in log-space, per layer (`2 × n`: row 0 =
+    /// ln τ_m, row 1 = ln τ_s); `None` for layers without τ metadata.
+    tau_rho: Vec<Option<Mat<f64>>>,
+    opt_tau: Vec<Option<Adam>>,
 }
 
 impl Trainer {
@@ -163,6 +195,8 @@ impl Trainer {
         });
         let mut opt_w = Vec::with_capacity(net.n_layers());
         let mut opt_rec = Vec::with_capacity(net.n_layers());
+        let mut tau_rho = Vec::with_capacity(net.n_layers());
+        let mut opt_tau = Vec::with_capacity(net.n_layers());
         for l in 0..net.n_layers() {
             let w = net.layer(l).weights();
             opt_w.push(Adam::new(w.nrows(), w.ncols()));
@@ -171,6 +205,34 @@ impl Trainer {
                     .recurrent_weights()
                     .map(|wr| Adam::new(wr.nrows(), wr.ncols())),
             );
+            let meta = if cfg.learn_tau {
+                net.layer(l).lif_taus()
+            } else {
+                None
+            };
+            match meta {
+                Some(meta) => {
+                    let n = meta.taus_m.len();
+                    let mut rho = Mat::<f64>::zeros(2, n);
+                    for j in 0..n {
+                        rho[(0, j)] = meta.taus_m[j].ln();
+                        rho[(1, j)] = meta.taus_s[j].ln();
+                    }
+                    tau_rho.push(Some(rho));
+                    opt_tau.push(Some(Adam::new(2, n)));
+                }
+                None => {
+                    tau_rho.push(None);
+                    opt_tau.push(None);
+                }
+            }
+        }
+        if cfg.learn_tau && tau_rho.iter().all(Option::is_none) {
+            return Err(SnnError::InvalidParameter(
+                "learn_tau is set but no layer carries LIF-τ metadata — build \
+                 layers with KoopmanLayer::lif_hetero"
+                    .into(),
+            ));
         }
         let opt_r = Adam::new(n_classes, n_out);
         Ok(Self {
@@ -179,7 +241,21 @@ impl Trainer {
             opt_w,
             opt_rec,
             opt_r,
+            tau_rho,
+            opt_tau,
         })
+    }
+
+    /// Current per-neuron time constants of learnable-τ layers, per layer
+    /// (`None` for layers without τ metadata). For inspection and logging.
+    pub fn taus(&self, net: &Network) -> Vec<Option<(Vec<f64>, Vec<f64>)>> {
+        (0..net.n_layers())
+            .map(|l| {
+                net.layer(l)
+                    .lif_taus()
+                    .map(|m| (m.taus_m.clone(), m.taus_s.clone()))
+            })
+            .collect()
     }
 
     pub fn readout(&self) -> &Mat<f64> {
@@ -195,13 +271,24 @@ impl Trainer {
     }
 
     /// Forward pass with tape; returns (per-step v_pre, per-step s_out,
-    /// output spike counts `n_out × batch`).
+    /// optional learnable-τ tape of per-step (x_pre, drive), output spike
+    /// counts `n_out × batch`). The τ tape is collected only when
+    /// `cfg.learn_tau` is set and `tau_tape` is requested.
     #[allow(clippy::type_complexity)]
     fn forward(
         &self,
         net: &mut Network,
         inputs: &[SpikeBatch],
-    ) -> Result<(Vec<Vec<Mat<f64>>>, Vec<Vec<SpikeBatch>>, Mat<f64>), SnnError> {
+        tau_tape: bool,
+    ) -> Result<
+        (
+            Vec<Vec<Mat<f64>>>,
+            Vec<Vec<SpikeBatch>>,
+            Option<Vec<Vec<(Mat<f64>, Mat<f64>)>>>,
+            Mat<f64>,
+        ),
+        SnnError,
+    > {
         // The trainer is bound to one network shape at construction; a
         // mismatched network must error, not panic mid-matmul.
         let readout_inputs = net.layer(net.n_layers() - 1).n_neurons();
@@ -213,9 +300,12 @@ impl Trainer {
         }
         let batch = net.batch();
         let n_layers = net.n_layers();
+        let want_tau = tau_tape && self.cfg.learn_tau;
         net.reset_state();
         let mut v_pre_tape = Vec::with_capacity(inputs.len());
         let mut s_out_tape = Vec::with_capacity(inputs.len());
+        let mut tau_tapes: Option<Vec<Vec<(Mat<f64>, Mat<f64>)>>> =
+            want_tau.then(|| Vec::with_capacity(inputs.len()));
         let n_out = net.layer(n_layers - 1).n_neurons();
         let mut counts = Mat::<f64>::zeros(n_out, batch);
 
@@ -226,7 +316,20 @@ impl Trainer {
             let mut s_out: Vec<SpikeBatch> = (0..n_layers)
                 .map(|l| SpikeBatch::zeros(net.layer(l).n_neurons(), batch))
                 .collect::<Result<_, _>>()?;
-            net.step_batch_taped(input, &mut v_pre, &mut s_out)?;
+            if let Some(tapes) = tau_tapes.as_mut() {
+                let mut x_pre: Vec<Mat<f64>> = (0..n_layers)
+                    .map(|l| {
+                        Mat::zeros(net.layer(l).n_neurons() * net.layer(l).n_state_vars(), batch)
+                    })
+                    .collect();
+                let mut drive: Vec<Mat<f64>> = (0..n_layers)
+                    .map(|l| Mat::zeros(net.layer(l).n_neurons(), batch))
+                    .collect();
+                net.step_batch_taped_tau(input, &mut v_pre, &mut s_out, &mut x_pre, &mut drive)?;
+                tapes.push(x_pre.into_iter().zip(drive).collect());
+            } else {
+                net.step_batch_taped(input, &mut v_pre, &mut s_out)?;
+            }
             let top = s_out[n_layers - 1].as_mat();
             match self.cfg.readout_decay {
                 None => {
@@ -248,7 +351,7 @@ impl Trainer {
             v_pre_tape.push(v_pre);
             s_out_tape.push(s_out);
         }
-        Ok((v_pre_tape, s_out_tape, counts))
+        Ok((v_pre_tape, s_out_tape, tau_tapes, counts))
     }
 
     /// Readout normalization: the effective mass of the (possibly leaky)
@@ -327,7 +430,7 @@ impl Trainer {
         let t_steps = inputs.len();
         let batch = net.batch();
         let n_layers = net.n_layers();
-        let (v_pre_tape, s_out_tape, counts) = self.forward(net, inputs)?;
+        let (v_pre_tape, s_out_tape, tau_tapes, counts) = self.forward(net, inputs, true)?;
 
         // logits = R · trace / norm (norm = T for the count readout, the
         // leaky-trace mass otherwise).
@@ -405,6 +508,14 @@ impl Trainer {
                     .map(|wr| Mat::zeros(wr.nrows(), wr.ncols()))
             })
             .collect();
+        // Propagator-entry gradients for learnable τ (rows [α, β, γ, δ, b₂]).
+        let mut grad_tau: Vec<Option<Mat<f64>>> = (0..n_layers)
+            .map(|l| {
+                self.tau_rho[l]
+                    .as_ref()
+                    .map(|_| Mat::zeros(5, net.layer(l).n_neurons()))
+            })
+            .collect();
 
         // κ^(T−1−t) factor for the leaky readout (1.0 throughout for counts).
         let mut readout_scale = 1.0f64;
@@ -480,6 +591,29 @@ impl Trainer {
                         }
                     }
                 }
+                // Learnable τ: dldy is exactly ∂L/∂(A·x_t + b⊙d), so the
+                // entry gradients are outer products with the taped pre-step
+                // state and drive:
+                //   ∂L/∂α_j = Σ_b dldy_v · v_t     ∂L/∂β_j  = Σ_b dldy_i · i_t
+                //   ∂L/∂γ_j = Σ_b dldy_v · i_t     ∂L/∂δ_j  = Σ_b dldy_v · d_j
+                //   ∂L/∂b₂_j = Σ_b dldy_i · d_j
+                if let (Some(gt), Some(tapes)) = (grad_tau[l].as_mut(), tau_tapes.as_ref()) {
+                    let (x_pre, drv) = &tapes[t][l];
+                    for b in 0..batch {
+                        for j in 0..n {
+                            let gv = dldy[l][(j, b)];
+                            let gi = dldy[l][(n + j, b)];
+                            let v_t = x_pre[(j, b)];
+                            let i_t = x_pre[(n + j, b)];
+                            let d_j = drv[(j, b)];
+                            gt[(0, j)] += gv * v_t;
+                            gt[(1, j)] += gi * i_t;
+                            gt[(2, j)] += gv * i_t;
+                            gt[(3, j)] += gv * d_j;
+                            gt[(4, j)] += gi * d_j;
+                        }
+                    }
+                }
                 // ∂L/∂d = Σ_p coupling(p, j) · ∂L/∂y_p ; accumulate ∂L/∂W.
                 let layer_l = net.layer(l);
                 for b in 0..batch {
@@ -540,6 +674,7 @@ impl Trainer {
             w: grad_w,
             rec: grad_rec,
             r: grad_r,
+            tau: grad_tau,
             loss_sum,
             correct,
         })
@@ -694,6 +829,73 @@ impl Trainer {
         let mut r = std::mem::replace(&mut self.r, Mat::zeros(0, 0));
         self.opt_r.update(&mut r, &grad_r, &self.cfg.optim);
         self.r = r;
+
+        // Learnable τ: chain the summed entry gradients through the analytic
+        // ∂entry/∂τ, then through τ = exp(ρ) (log-space parameters), update ρ
+        // with the shared optimizer, clamp, and write the new propagator
+        // entries back into the layer.
+        for l in 0..n_layers {
+            let (Some(rho), Some(opt), Some(gt)) = (
+                self.tau_rho[l].as_mut(),
+                self.opt_tau[l].as_mut(),
+                grads.tau[l].as_ref(),
+            ) else {
+                continue;
+            };
+            let Some(meta) = net.layer(l).lif_taus() else {
+                continue;
+            };
+            let n = meta.taus_m.len();
+            let (taus_m, taus_s, r_gain, dt) =
+                (meta.taus_m.clone(), meta.taus_s.clone(), meta.r, meta.dt);
+            let mut g_rho = Mat::<f64>::zeros(2, n);
+            for j in 0..n {
+                // Clamps keep the pair separated, so the formula cannot fail;
+                // treat failure as a zero gradient rather than aborting a run.
+                let Ok((_, dm, ds)) =
+                    crate::neuron::lif_entry_grads(taus_m[j], taus_s[j], r_gain, dt)
+                else {
+                    continue;
+                };
+                let mut g_tm = 0.0;
+                let mut g_ts = 0.0;
+                for k in 0..5 {
+                    g_tm += gt[(k, j)] * dm[k];
+                    g_ts += gt[(k, j)] * ds[k];
+                }
+                // dτ/dρ = τ.
+                g_rho[(0, j)] = g_tm * taus_m[j];
+                g_rho[(1, j)] = g_ts * taus_s[j];
+            }
+            if let Some(clip) = self.cfg.grad_clip {
+                for j in 0..n {
+                    g_rho[(0, j)] = g_rho[(0, j)].clamp(-clip, clip);
+                    g_rho[(1, j)] = g_rho[(1, j)].clamp(-clip, clip);
+                }
+            }
+            opt.update(rho, &g_rho, &self.cfg.optim);
+            // Map back to τ, clamp to the trusted region, re-sync ρ.
+            let mut new_tm = vec![0.0; n];
+            let mut new_ts = vec![0.0; n];
+            for j in 0..n {
+                let mut tm = rho[(0, j)].exp().clamp(TAU_M_RANGE.0, TAU_M_RANGE.1);
+                let mut ts = rho[(1, j)].exp().clamp(TAU_S_RANGE.0, TAU_S_RANGE.1);
+                if tm < TAU_SEPARATION * ts {
+                    ts = tm / TAU_SEPARATION;
+                    if ts < TAU_S_RANGE.0 {
+                        ts = TAU_S_RANGE.0;
+                        tm = TAU_SEPARATION * ts;
+                    }
+                }
+                rho[(0, j)] = tm.ln();
+                rho[(1, j)] = ts.ln();
+                new_tm[j] = tm;
+                new_ts[j] = ts;
+            }
+            net.layer_mut(l)
+                .set_lif_taus(&new_tm, &new_ts)
+                .expect("clamped taus are always valid");
+        }
     }
 
     /// Classify a batch: argmax of the readout on output spike counts.
@@ -725,7 +927,7 @@ impl Trainer {
         let batch = net.batch();
         let threads = self.cfg.threads.max(1).min(batch);
         let counts = if threads == 1 || inputs.is_empty() {
-            self.forward(net, inputs)?.2
+            self.forward(net, inputs, false)?.3
         } else {
             let base = batch / threads;
             let rem = batch % threads;
@@ -753,7 +955,7 @@ impl Trainer {
                 let handles: Vec<_> = chunk_nets
                     .iter_mut()
                     .zip(&chunk_inputs)
-                    .map(|(cnet, cin)| scope.spawn(move || Ok(self.forward(cnet, cin)?.2)))
+                    .map(|(cnet, cin)| scope.spawn(move || Ok(self.forward(cnet, cin, false)?.3)))
                     .collect();
                 handles
                     .into_iter()
@@ -800,7 +1002,7 @@ impl Trainer {
         targets: &[usize],
         eps: f64,
     ) -> Result<f64, SnnError> {
-        let (_, _, counts) = self.forward(net, inputs)?;
+        let (_, _, _, counts) = self.forward(net, inputs, false)?;
         let t_steps = inputs.len();
         let (classes, n_out) = (self.r.nrows(), self.r.ncols());
         let logits_for = |r: &Mat<f64>| {

@@ -104,6 +104,40 @@ impl Network {
         v_pre: &mut [faer::Mat<f64>],
         s_out: &mut [SpikeBatch],
     ) -> Result<(), SnnError> {
+        self.step_batch_taped_impl(input, v_pre, s_out, None)
+    }
+
+    /// [`step_batch_taped`](Self::step_batch_taped) with the extra tape the
+    /// learnable-τ gradient needs: `x_pre[l]` receives the layer's **pre-step**
+    /// state (`k_l·n_l × batch`) and `drive[l]` the drive `W·s_in (+ rec)` the
+    /// step computed (`n_l × batch`).
+    pub fn step_batch_taped_tau(
+        &mut self,
+        input: &SpikeBatch,
+        v_pre: &mut [faer::Mat<f64>],
+        s_out: &mut [SpikeBatch],
+        x_pre: &mut [faer::Mat<f64>],
+        drive: &mut [faer::Mat<f64>],
+    ) -> Result<(), SnnError> {
+        if x_pre.len() != self.layers.len() || drive.len() != self.layers.len() {
+            return Err(SnnError::DimensionMismatch(format!(
+                "τ-tape buffers cover {} / {} layers, network has {}",
+                x_pre.len(),
+                drive.len(),
+                self.layers.len()
+            )));
+        }
+        self.step_batch_taped_impl(input, v_pre, s_out, Some((x_pre, drive)))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn step_batch_taped_impl(
+        &mut self,
+        input: &SpikeBatch,
+        v_pre: &mut [faer::Mat<f64>],
+        s_out: &mut [SpikeBatch],
+        mut tau_tape: Option<(&mut [faer::Mat<f64>], &mut [faer::Mat<f64>])>,
+    ) -> Result<(), SnnError> {
         if v_pre.len() != self.layers.len() || s_out.len() != self.layers.len() {
             return Err(SnnError::DimensionMismatch(format!(
                 "tape buffers cover {} / {} layers, network has {}",
@@ -113,6 +147,16 @@ impl Network {
             )));
         }
         for l in 0..self.layers.len() {
+            // (τ tape) the state BEFORE this layer advances.
+            if let Some((x_pre, _)) = tau_tape.as_mut() {
+                let src = self.states[l].as_mat();
+                let dst = &mut x_pre[l];
+                for b in 0..src.ncols() {
+                    for i in 0..src.nrows() {
+                        dst[(i, b)] = src[(i, b)];
+                    }
+                }
+            }
             let (prev, rest) = self.batch_bufs.split_at_mut(l);
             let s_in = if l == 0 { input } else { &prev[l - 1] };
             self.layers[l].step_batch_taped(
@@ -121,6 +165,16 @@ impl Network {
                 &mut rest[0],
                 &mut v_pre[l],
             )?;
+            // (τ tape) the drive this step computed.
+            if let Some((_, drive)) = tau_tape.as_mut() {
+                let src = self.layers[l].drive();
+                let dst = &mut drive[l];
+                for b in 0..src.ncols() {
+                    for i in 0..src.nrows() {
+                        dst[(i, b)] = src[(i, b)];
+                    }
+                }
+            }
             // Copy the emitted spikes into the caller's tape.
             let src = self.batch_bufs[l].as_mat();
             let mut dst = s_out[l].as_mat_mut();

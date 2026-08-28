@@ -146,6 +146,58 @@ impl Lif {
     }
 }
 
+/// The five discrete-propagator entries `[α, β, γ, δ, 1−β]` of the exact LIF
+/// step together with their partial derivatives with respect to `τ_m` and
+/// `τ_s` — the chain-rule seed for learnable time constants (backprop into
+/// the propagator entries; improvements.md P1.1).
+///
+/// Uses the non-degenerate closed form, so it requires the time constants to
+/// be separated by at least 0.1% relative: near coincidence both γ's value
+/// and its τ-derivatives lose precision to cancellation, and the learnable-τ
+/// path keeps τ_m and τ_s apart by construction (the trainer's clamp).
+///
+/// Returns `(entries, d_dtau_m, d_dtau_s)`, each `[α, β, γ, δ, b₂]`-ordered
+/// with `b₂ = 1 − β`.
+#[allow(clippy::type_complexity)]
+pub fn lif_entry_grads(
+    tau_m: f64,
+    tau_s: f64,
+    r: f64,
+    dt: f64,
+) -> Result<([f64; 5], [f64; 5], [f64; 5]), SnnError> {
+    if !(util::is_positive(tau_m) && util::is_positive(tau_s) && util::is_positive(dt)) {
+        return Err(SnnError::InvalidParameter(format!(
+            "tau_m, tau_s, dt must be positive (tau_m = {tau_m}, tau_s = {tau_s}, dt = {dt})"
+        )));
+    }
+    let sep = (tau_m - tau_s).abs();
+    if sep <= 1e-3 * tau_m.max(tau_s) {
+        return Err(SnnError::NumericalError(format!(
+            "lif_entry_grads needs separated time constants: |{tau_m} − {tau_s}| \
+             is within 0.1% — the γ derivative is numerically unreliable there"
+        )));
+    }
+    let alpha = (-dt / tau_m).exp();
+    let beta = (-dt / tau_s).exp();
+    let d = tau_m - tau_s;
+    let gamma = r * tau_s * (alpha - beta) / d;
+    let delta = r * (1.0 - alpha) - gamma;
+    let b2 = 1.0 - beta;
+
+    let da_dtm = alpha * dt / (tau_m * tau_m);
+    let db_dts = beta * dt / (tau_s * tau_s);
+    let dg_dtm = r * tau_s * (da_dtm * d - (alpha - beta)) / (d * d);
+    let dg_dts = r * (((alpha - beta) - tau_s * db_dts) * d + tau_s * (alpha - beta)) / (d * d);
+    let dd_dtm = -r * da_dtm - dg_dtm;
+    let dd_dts = -dg_dts;
+
+    Ok((
+        [alpha, beta, gamma, delta, b2],
+        [da_dtm, 0.0, dg_dtm, dd_dtm, 0.0],
+        [0.0, db_dts, dg_dts, dd_dts, -db_dts],
+    ))
+}
+
 /// Closed-form coupling of an exponentially decaying input (time constant
 /// `tau_in`, decay factor `decay_in` over `dt`) into the membrane equation
 /// with gain `r/τ_m`: `r·τ_in·(α − decay_in)/(τ_m − τ_in)`, with the
@@ -215,6 +267,73 @@ impl NeuronModel for Lif {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn entry_grads_match_central_finite_differences() {
+        // The analytic ∂/∂τ of every propagator entry is the chain-rule seed
+        // for learnable time constants; a wrong sign or factor here corrupts
+        // every τ update, so it is gated against central differences at
+        // several operating points (including SHD's 20/10 ms at 10 ms bins).
+        let eps = 1e-6;
+        for &(tau_m, tau_s, r, dt) in &[
+            (20.0, 10.0, 1.0, 10.0),
+            (20.0, 10.0, 1.0, 1.0),
+            (15.0, 3.0, 2.0, 0.5),
+            (40.0, 12.0, 0.7, 5.0),
+            (8.0, 30.0, 1.0, 1.0), // τ_s > τ_m is legal for the formula
+        ] {
+            let (_, dm, ds) = lif_entry_grads(tau_m, tau_s, r, dt).unwrap();
+            let (hi_m, _, _) = lif_entry_grads(tau_m + eps, tau_s, r, dt).unwrap();
+            let (lo_m, _, _) = lif_entry_grads(tau_m - eps, tau_s, r, dt).unwrap();
+            let (hi_s, _, _) = lif_entry_grads(tau_m, tau_s + eps, r, dt).unwrap();
+            let (lo_s, _, _) = lif_entry_grads(tau_m, tau_s - eps, r, dt).unwrap();
+            for k in 0..5 {
+                let fd_m = (hi_m[k] - lo_m[k]) / (2.0 * eps);
+                let fd_s = (hi_s[k] - lo_s[k]) / (2.0 * eps);
+                let tol = 1e-6 * fd_m.abs().max(dm[k].abs()).max(1e-9);
+                assert!(
+                    (fd_m - dm[k]).abs() <= tol,
+                    "∂entry[{k}]/∂τ_m at ({tau_m},{tau_s},{r},{dt}): \
+                     analytic {} vs FD {fd_m}",
+                    dm[k]
+                );
+                let tol = 1e-6 * fd_s.abs().max(ds[k].abs()).max(1e-9);
+                assert!(
+                    (fd_s - ds[k]).abs() <= tol,
+                    "∂entry[{k}]/∂τ_s at ({tau_m},{tau_s},{r},{dt}): \
+                     analytic {} vs FD {fd_s}",
+                    ds[k]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn entry_grads_reject_near_degenerate_taus() {
+        assert!(lif_entry_grads(10.0, 10.0, 1.0, 1.0).is_err());
+        assert!(lif_entry_grads(10.0, 10.0 * (1.0 + 1e-5), 1.0, 1.0).is_err());
+        assert!(lif_entry_grads(10.0, 10.5, 1.0, 1.0).is_ok());
+    }
+
+    #[test]
+    fn entry_values_match_the_lif_propagator() {
+        // Entries from the gradient helper must agree with the Lif oracle.
+        let lif = Lif::new(LifParams {
+            tau_m: 20.0,
+            tau_s: 10.0,
+            dt: 10.0,
+            ..LifParams::default()
+        })
+        .unwrap();
+        let (e, _, _) = lif_entry_grads(20.0, 10.0, 1.0, 10.0).unwrap();
+        let a = lif.a_local();
+        let b = lif.b_local();
+        assert_relative_eq!(e[0], a[(0, 0)], max_relative = 1e-14);
+        assert_relative_eq!(e[1], a[(1, 1)], max_relative = 1e-14);
+        assert_relative_eq!(e[2], a[(0, 1)], max_relative = 1e-14);
+        assert_relative_eq!(e[3], b[0], max_relative = 1e-14);
+        assert_relative_eq!(e[4], b[1], max_relative = 1e-14);
+    }
 
     fn silent_lif(dt: f64) -> Lif {
         // High threshold so nothing fires: pure sub-threshold dynamics.
