@@ -56,6 +56,16 @@ pub struct TrainConfig {
     /// spikes more — a readout memory of ≈ 1/(1−κ) steps. `None` keeps the
     /// uniform count readout.
     pub readout_decay: Option<f64>,
+    /// Data-parallel threads for the batch dimension of `train_step` and
+    /// `logits`. `1` (the default) is the exact single-threaded path that
+    /// reproduces all recorded results bit-for-bit. With `t > 1` the batch
+    /// splits into `t` column chunks, each processed on its own thread with
+    /// its own network copy; chunk gradients are summed in fixed chunk order,
+    /// so results are deterministic for a given thread count, but floating-
+    /// point summation order differs from the serial path (differences
+    /// ~1e-15 per step, which can drift across a long run the way any seed
+    /// perturbation does).
+    pub threads: usize,
 }
 
 impl Default for TrainConfig {
@@ -71,7 +81,49 @@ impl Default for TrainConfig {
             grad_clip: Some(1.0),
             weight_decay: 0.0,
             readout_decay: None,
+            threads: 1,
         }
+    }
+}
+
+/// Gradients and loss statistics from one forward+backward pass over a batch
+/// (or a column chunk of one). Chunks sum entrywise: every gradient inside is
+/// normalized by the *full* batch's `loss_denom`, so summation needs no
+/// rescaling.
+struct BatchGrads {
+    w: Vec<Mat<f64>>,
+    rec: Vec<Option<Mat<f64>>>,
+    r: Mat<f64>,
+    /// Unnormalized Σ_b per-sample loss.
+    loss_sum: f64,
+    correct: usize,
+}
+
+impl BatchGrads {
+    fn add(&mut self, other: &BatchGrads) {
+        for (a, b) in self.w.iter_mut().zip(&other.w) {
+            for c in 0..a.ncols() {
+                for i in 0..a.nrows() {
+                    a[(i, c)] += b[(i, c)];
+                }
+            }
+        }
+        for (a, b) in self.rec.iter_mut().zip(&other.rec) {
+            if let (Some(a), Some(b)) = (a.as_mut(), b.as_ref()) {
+                for c in 0..a.ncols() {
+                    for i in 0..a.nrows() {
+                        a[(i, c)] += b[(i, c)];
+                    }
+                }
+            }
+        }
+        for c in 0..self.r.ncols() {
+            for i in 0..self.r.nrows() {
+                self.r[(i, c)] += other.r[(i, c)];
+            }
+        }
+        self.loss_sum += other.loss_sum;
+        self.correct += other.correct;
     }
 }
 
@@ -208,12 +260,15 @@ impl Trainer {
         }
     }
 
-    /// Softmax cross-entropy over logits; returns (mean loss, ∂L/∂logits,
-    /// accuracy).
+    /// Softmax cross-entropy over logits; returns (Σ_b per-sample loss,
+    /// ∂L/∂logits normalized by `denom`, correct-prediction count). `denom`
+    /// is the full-minibatch size — a column chunk passes the full size so
+    /// chunk gradients sum to exactly the full-batch gradient.
     fn loss_and_grad(
         logits: &Mat<f64>,
         targets: &[usize],
-    ) -> Result<(f64, Mat<f64>, f64), SnnError> {
+        denom: usize,
+    ) -> Result<(f64, Mat<f64>, usize), SnnError> {
         let (classes, batch) = (logits.nrows(), logits.ncols());
         if targets.len() != batch {
             return Err(SnnError::DimensionMismatch(format!(
@@ -243,7 +298,7 @@ impl Trainer {
             let mut best = 0usize;
             for i in 0..classes {
                 let p = (logits[(i, b)] - log_z).exp();
-                dlogits[(i, b)] = (p - if i == target { 1.0 } else { 0.0 }) / batch as f64;
+                dlogits[(i, b)] = (p - if i == target { 1.0 } else { 0.0 }) / denom as f64;
                 if logits[(i, b)] > logits[(best, b)] {
                     best = i;
                 }
@@ -252,17 +307,20 @@ impl Trainer {
                 correct += 1;
             }
         }
-        Ok((loss / batch as f64, dlogits, correct as f64 / batch as f64))
+        Ok((loss, dlogits, correct))
     }
 
-    /// One minibatch: taped forward, hand-rolled backward, optimizer step on
-    /// every layer's `W` and the readout.
-    pub fn train_step(
-        &mut self,
+    /// Taped forward + hand-rolled backward over one batch (or one column
+    /// chunk of a larger minibatch), producing gradients normalized by
+    /// `loss_denom` (the full minibatch size). Does not touch the optimizer;
+    /// [`train_step`](Self::train_step) sums chunks and applies the update.
+    fn forward_backward(
+        &self,
         net: &mut Network,
         inputs: &[SpikeBatch],
         targets: &[usize],
-    ) -> Result<StepStats, SnnError> {
+        loss_denom: usize,
+    ) -> Result<BatchGrads, SnnError> {
         if inputs.is_empty() {
             return Err(SnnError::InvalidParameter("empty input sequence".into()));
         }
@@ -286,7 +344,7 @@ impl Trainer {
                 logits[(i, b)] = acc / norm;
             }
         }
-        let (loss, dlogits, accuracy) = Self::loss_and_grad(&logits, targets)?;
+        let (loss_sum, dlogits, correct) = Self::loss_and_grad(&logits, targets, loss_denom)?;
 
         // ∂L/∂R = dlogits · traceᵀ / norm.
         let mut grad_r = Mat::<f64>::zeros(classes, n_out);
@@ -478,7 +536,116 @@ impl Trainer {
             }
         }
 
-        // Clip + update.
+        Ok(BatchGrads {
+            w: grad_w,
+            rec: grad_rec,
+            r: grad_r,
+            loss_sum,
+            correct,
+        })
+    }
+
+    /// One minibatch: taped forward, hand-rolled backward, optimizer step on
+    /// every layer's `W` and the readout. With `cfg.threads > 1` the batch is
+    /// split into column chunks processed in parallel (each on its own copy
+    /// of the network) and the chunk gradients are summed in fixed order
+    /// before the single optimizer update.
+    pub fn train_step(
+        &mut self,
+        net: &mut Network,
+        inputs: &[SpikeBatch],
+        targets: &[usize],
+    ) -> Result<StepStats, SnnError> {
+        let batch = net.batch();
+        if targets.len() != batch {
+            return Err(SnnError::DimensionMismatch(format!(
+                "{} targets for batch {batch}",
+                targets.len()
+            )));
+        }
+        let threads = self.cfg.threads.max(1).min(batch);
+        let grads = if threads == 1 {
+            self.forward_backward(net, inputs, targets, batch)?
+        } else {
+            self.chunked_grads(net, inputs, targets, threads)?
+        };
+        self.apply_update(net, &grads);
+        Ok(StepStats {
+            loss: grads.loss_sum / batch as f64,
+            accuracy: grads.correct as f64 / batch as f64,
+        })
+    }
+
+    /// Data-parallel gradients: split the batch columns into `threads`
+    /// chunks, run [`forward_backward`](Self::forward_backward) on each in
+    /// its own thread with a chunk-sized network copy, and sum in chunk
+    /// order (deterministic for a fixed thread count).
+    fn chunked_grads(
+        &self,
+        net: &Network,
+        inputs: &[SpikeBatch],
+        targets: &[usize],
+        threads: usize,
+    ) -> Result<BatchGrads, SnnError> {
+        if inputs.is_empty() {
+            return Err(SnnError::InvalidParameter("empty input sequence".into()));
+        }
+        let batch = net.batch();
+        let base = batch / threads;
+        let rem = batch % threads;
+        // Chunk boundaries: the first `rem` chunks carry one extra column.
+        let mut spans = Vec::with_capacity(threads);
+        let mut start = 0usize;
+        for c in 0..threads {
+            let len = base + usize::from(c < rem);
+            spans.push((start, len));
+            start += len;
+        }
+        // Per-chunk nets and column-sliced inputs, prepared up front.
+        let mut chunk_nets: Vec<Network> = spans
+            .iter()
+            .map(|&(_, len)| net.clone_with_batch(len))
+            .collect::<Result<_, _>>()?;
+        let chunk_inputs: Vec<Vec<SpikeBatch>> = spans
+            .iter()
+            .map(|&(s, len)| {
+                inputs
+                    .iter()
+                    .map(|step| step.column_range(s, len))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<_, _>>()?;
+
+        let results: Vec<Result<BatchGrads, SnnError>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk_nets
+                .iter_mut()
+                .zip(&chunk_inputs)
+                .zip(&spans)
+                .map(|((cnet, cin), &(s, len))| {
+                    let ctargets = &targets[s..s + len];
+                    scope.spawn(move || self.forward_backward(cnet, cin, ctargets, batch))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("training worker panicked"))
+                .collect()
+        });
+        let mut iter = results.into_iter();
+        let mut total = iter.next().expect("at least one chunk")?;
+        for r in iter {
+            total.add(&r?);
+        }
+        Ok(total)
+    }
+
+    /// Clip the summed gradients and apply the optimizer + weight decay to
+    /// the live network and readout.
+    fn apply_update(&mut self, net: &mut Network, grads: &BatchGrads) {
+        let n_layers = net.n_layers();
+        let mut grad_w = grads.w.clone();
+        let mut grad_rec = grads.rec.clone();
+        let mut grad_r = grads.r.clone();
         if let Some(clip) = self.cfg.grad_clip {
             for g in grad_w
                 .iter_mut()
@@ -527,8 +694,6 @@ impl Trainer {
         let mut r = std::mem::replace(&mut self.r, Mat::zeros(0, 0));
         self.opt_r.update(&mut r, &grad_r, &self.cfg.optim);
         self.r = r;
-
-        Ok(StepStats { loss, accuracy })
     }
 
     /// Classify a batch: argmax of the readout on output spike counts.
@@ -553,11 +718,61 @@ impl Trainer {
     }
 
     /// Readout logits (`n_classes × batch`) for a batch — forward pass only.
-    /// Lets callers combine models (ensembling) or inspect confidence.
+    /// Lets callers combine models (ensembling) or inspect confidence. With
+    /// `cfg.threads > 1` the batch columns are evaluated in parallel chunks
+    /// (forward only, so the result is exactly the serial one).
     pub fn logits(&self, net: &mut Network, inputs: &[SpikeBatch]) -> Result<Mat<f64>, SnnError> {
-        let (_, _, counts) = self.forward(net, inputs)?;
+        let batch = net.batch();
+        let threads = self.cfg.threads.max(1).min(batch);
+        let counts = if threads == 1 || inputs.is_empty() {
+            self.forward(net, inputs)?.2
+        } else {
+            let base = batch / threads;
+            let rem = batch % threads;
+            let mut spans = Vec::with_capacity(threads);
+            let mut start = 0usize;
+            for c in 0..threads {
+                let len = base + usize::from(c < rem);
+                spans.push((start, len));
+                start += len;
+            }
+            let mut chunk_nets: Vec<Network> = spans
+                .iter()
+                .map(|&(_, len)| net.clone_with_batch(len))
+                .collect::<Result<_, _>>()?;
+            let chunk_inputs: Vec<Vec<SpikeBatch>> = spans
+                .iter()
+                .map(|&(s, len)| {
+                    inputs
+                        .iter()
+                        .map(|step| step.column_range(s, len))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<_, _>>()?;
+            let results: Vec<Result<Mat<f64>, SnnError>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = chunk_nets
+                    .iter_mut()
+                    .zip(&chunk_inputs)
+                    .map(|(cnet, cin)| scope.spawn(move || Ok(self.forward(cnet, cin)?.2)))
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().expect("eval worker panicked"))
+                    .collect()
+            });
+            let n_out = self.r.ncols();
+            let mut counts = Mat::<f64>::zeros(n_out, batch);
+            for (res, &(s, len)) in results.into_iter().zip(&spans) {
+                let c = res?;
+                for col in 0..len {
+                    for i in 0..n_out {
+                        counts[(i, s + col)] = c[(i, col)];
+                    }
+                }
+            }
+            counts
+        };
         let norm = self.readout_norm(inputs.len());
-        let batch = counts.ncols();
         let classes = self.r.nrows();
         let mut logits = Mat::<f64>::zeros(classes, batch);
         for b in 0..batch {
@@ -601,7 +816,8 @@ impl Trainer {
             }
             logits
         };
-        let (_, dlogits, _) = Self::loss_and_grad(&logits_for(&self.r), targets)?;
+        let batch = counts.ncols();
+        let (_, dlogits, _) = Self::loss_and_grad(&logits_for(&self.r), targets, batch)?;
         // Analytic ∂L/∂R.
         let mut grad_r = Mat::<f64>::zeros(classes, n_out);
         for i in 0..classes {
@@ -622,9 +838,11 @@ impl Trainer {
                 r_hi[(i, j)] += eps;
                 let mut r_lo = self.r.clone();
                 r_lo[(i, j)] -= eps;
-                let (l_hi, _, _) = Self::loss_and_grad(&logits_for(&r_hi), targets)?;
-                let (l_lo, _, _) = Self::loss_and_grad(&logits_for(&r_lo), targets)?;
-                let fd = (l_hi - l_lo) / (2.0 * eps);
+                let (l_hi, _, _) = Self::loss_and_grad(&logits_for(&r_hi), targets, batch)?;
+                let (l_lo, _, _) = Self::loss_and_grad(&logits_for(&r_lo), targets, batch)?;
+                // loss_and_grad returns the per-sample SUM; the analytic
+                // gradient is normalized by batch, so divide the FD to match.
+                let fd = (l_hi - l_lo) / (2.0 * eps * batch as f64);
                 let denom = fd.abs().max(grad_r[(i, j)].abs());
                 if denom > 1e-8 {
                     worst = worst.max((fd - grad_r[(i, j)]).abs() / denom);

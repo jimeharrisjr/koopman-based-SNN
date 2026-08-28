@@ -187,6 +187,28 @@ impl SpikeBatch {
             .map(|j| self.column_to_sparse(j))
             .collect()
     }
+
+    /// Copy a contiguous column range into a new batch (the training path's
+    /// data-parallel chunking uses this to split a minibatch across threads).
+    pub fn column_range(&self, start: usize, len: usize) -> Result<SpikeBatch, SnnError> {
+        if len == 0 || start + len > self.batch() {
+            return Err(SnnError::DimensionMismatch(format!(
+                "column range {start}..{} out of batch {}",
+                start + len,
+                self.batch()
+            )));
+        }
+        let mut out = SpikeBatch::zeros(self.n_neurons(), len)?;
+        {
+            let mut m = out.as_mat_mut();
+            for c in 0..len {
+                for i in 0..self.s.nrows() {
+                    m[(i, c)] = self.s[(i, start + c)];
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]

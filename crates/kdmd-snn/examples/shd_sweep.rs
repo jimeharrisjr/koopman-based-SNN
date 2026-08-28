@@ -29,6 +29,7 @@ const BATCH: usize = 32;
 const DATA_SEED: u64 = 7; // shared: identical minibatch sequence for all runs
 const INIT_SEED: u64 = 42;
 
+#[derive(Clone, Copy)]
 struct ExpConfig {
     tag: &'static str,
     name: &'static str,
@@ -524,15 +525,22 @@ fn build_network(cfg: &ExpConfig, seed_bump: u64) -> Network {
 
 struct RunResult {
     tag: &'static str,
+    seed_bump: u64,
     test_accuracy: f64,
     final_train_loss: f64,
     train_secs: f64,
     loss_curve: Vec<(usize, f64)>,
 }
 
-fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> RunResult {
+fn run_experiment(
+    cfg: &ExpConfig,
+    train: &[ShdSample],
+    test: &[ShdSample],
+    threads: usize,
+) -> RunResult {
     println!(
-        "\n### [{}] {} — pooled {}, hidden {:?}, {} minibatches, {}x{}s bins, ensemble {}",
+        "\n### [{}] {} — pooled {}, hidden {:?}, {} minibatches, {}x{}s bins, ensemble {}, \
+         seed_bump {}, threads {}",
         cfg.tag,
         cfg.name,
         cfg.n_pooled,
@@ -540,7 +548,9 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
         cfg.minibatches,
         cfg.t_steps,
         cfg.bin_s,
-        cfg.ensemble
+        cfg.ensemble,
+        cfg.seed_bump,
+        threads
     );
     // Per-class index for the balanced-sampling variation.
     let mut by_class: Vec<Vec<usize>> = vec![Vec::new(); N_CLASSES];
@@ -560,6 +570,7 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
             TrainConfig {
                 weight_decay: cfg.weight_decay,
                 readout_decay: cfg.readout_decay,
+                threads,
                 ..TrainConfig::default()
             },
         )
@@ -650,6 +661,7 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
     );
     RunResult {
         tag: cfg.tag,
+        seed_bump: cfg.seed_bump,
         test_accuracy,
         final_train_loss,
         train_secs,
@@ -658,7 +670,44 @@ fn run_experiment(cfg: &ExpConfig, train: &[ShdSample], test: &[ShdSample]) -> R
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    // `--seeds N`: run every selected experiment N times, with seed_bump
+    // offsets 0, 100, 200, … added to the config's own bump. The ±2.7-point
+    // seed audit (round 5) is the reason this exists: single-seed margins
+    // under ~3 points are noise, so multi-seed is the default reporting
+    // standard (improvements.md P0.2).
+    let mut n_seeds = 1usize;
+    // `--threads N`: data-parallel batch chunking in the trainer. Default 1
+    // preserves bit-exact reproducibility of the recorded logs; threaded runs
+    // are deterministic for a fixed N but not bit-identical to serial (see
+    // TrainConfig::threads). Runs meant for the record should state their N.
+    let mut n_threads = 1usize;
+    let mut args: Vec<String> = Vec::new();
+    let mut it = raw_args.into_iter();
+    while let Some(a) = it.next() {
+        let flag = |it: &mut std::vec::IntoIter<String>, name: &str| -> usize {
+            let v = it.next().unwrap_or_else(|| {
+                eprintln!("{name} needs a count");
+                std::process::exit(1);
+            });
+            let n: usize = v.parse().unwrap_or_else(|_| {
+                eprintln!("{name}: invalid count {v:?}");
+                std::process::exit(1);
+            });
+            if n == 0 {
+                eprintln!("{name} must be at least 1");
+                std::process::exit(1);
+            }
+            n
+        };
+        if a == "--seeds" {
+            n_seeds = flag(&mut it, "--seeds");
+        } else if a == "--threads" {
+            n_threads = flag(&mut it, "--threads");
+        } else {
+            args.push(a);
+        }
+    }
     let selected: Vec<&ExpConfig> = if args.is_empty() {
         // Default: the six controlled-budget variations A-F.
         EXPERIMENTS.iter().filter(|e| e.tag < "G").collect()
@@ -684,26 +733,60 @@ fn main() {
 
     let mut results = Vec::new();
     for cfg in &selected {
-        results.push(run_experiment(cfg, &train, &test));
+        for seed_idx in 0..n_seeds {
+            let mut run_cfg = **cfg;
+            run_cfg.seed_bump = cfg.seed_bump + 100 * seed_idx as u64;
+            results.push(run_experiment(&run_cfg, &train, &test, n_threads));
+        }
     }
 
     println!("\n## Summary (chance = {:.3})", 1.0 / N_CLASSES as f64);
-    println!("| tag | test acc | final loss | train (s) |");
-    println!("|---|---|---|---|");
+    println!("| tag | seed_bump | test acc | final loss | train (s) |");
+    println!("|---|---|---|---|---|");
     for r in &results {
         println!(
-            "| {} | {:.4} | {:.4} | {:.1} |",
-            r.tag, r.test_accuracy, r.final_train_loss, r.train_secs
+            "| {} | {} | {:.4} | {:.4} | {:.1} |",
+            r.tag, r.seed_bump, r.test_accuracy, r.final_train_loss, r.train_secs
         );
+    }
+    // Per-tag aggregates: mean ± half-range over seeds. Any margin smaller
+    // than the printed spread (or the round-5 reference ±2.7 points for
+    // single runs) is inconclusive.
+    if n_seeds > 1 {
+        println!();
+        for cfg in &selected {
+            let accs: Vec<f64> = results
+                .iter()
+                .filter(|r| r.tag == cfg.tag)
+                .map(|r| r.test_accuracy)
+                .collect();
+            let mean = accs.iter().sum::<f64>() / accs.len() as f64;
+            let lo = accs.iter().cloned().fold(f64::MAX, f64::min);
+            let hi = accs.iter().cloned().fold(f64::MIN, f64::max);
+            println!(
+                "AGGREGATE [{}]: mean {:.4} ± {:.4} over {} seeds (range {:.4}–{:.4})",
+                cfg.tag,
+                mean,
+                (hi - lo) / 2.0,
+                accs.len(),
+                lo,
+                hi
+            );
+        }
     }
     // Loss curves for the demo log.
     for r in &results {
+        let label = if n_seeds > 1 {
+            format!("{}+{}", r.tag, r.seed_bump)
+        } else {
+            r.tag.to_string()
+        };
         let pts: Vec<String> = r
             .loss_curve
             .iter()
             .step_by(3)
             .map(|(s, l)| format!("{s}:{l:.3}"))
             .collect();
-        println!("curve {}: {}", r.tag, pts.join(" "));
+        println!("curve {label}: {}", pts.join(" "));
     }
 }

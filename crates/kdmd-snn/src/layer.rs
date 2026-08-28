@@ -349,6 +349,21 @@ impl KoopmanLayer {
             .with_jumps(vec![-theta, 0.0, b_jump])
     }
 
+    /// Clone this layer with scratch (and episodic recurrent state) resized
+    /// for a different batch capacity. Weights and dynamics are shared
+    /// unchanged; the clone starts with cleared previous-step spikes, so
+    /// callers should `reset_state` before stepping (the training paths do).
+    pub fn clone_with_batch(&self, batch: usize) -> Result<Self, SnnError> {
+        if batch == 0 {
+            return Err(SnnError::InvalidParameter("batch must be nonzero".into()));
+        }
+        let mut l = self.clone();
+        l.prev_spikes = Mat::zeros(self.n_neurons, batch);
+        l.y = Mat::zeros(self.n_neurons * self.n_state_vars, batch);
+        l.drive = Mat::zeros(self.n_neurons, batch);
+        Ok(l)
+    }
+
     pub fn n_neurons(&self) -> usize {
         self.n_neurons
     }

@@ -287,6 +287,130 @@ fn fast_path_rejects_nonzero_rest_and_hard_reset() {
 }
 
 #[test]
+fn threaded_train_step_matches_serial_gradients() {
+    // Data-parallel chunking (improvements.md P2.1) must produce the same
+    // update as the serial path up to floating-point summation order: after
+    // one identical train_step, weights, recurrent weights, and the readout
+    // agree to ~1e-12, and the forward-only logits agree exactly.
+    let lif = Lif::new(LifParams {
+        dt: DT,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let build = || {
+        let mut rng = StdRng::seed_from_u64(71);
+        let w0 = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+        let w1 = Mat::from_fn(16, N_HIDDEN, |_, _| rng.random_range(0.0..1.5));
+        let l0 = KoopmanLayer::lif(&lif, N_HIDDEN, w0, BATCH)
+            .unwrap()
+            .with_recurrent(Mat::from_fn(N_HIDDEN, N_HIDDEN, |i, j| {
+                0.02 * ((i * 7 + j) % 5) as f64
+            }))
+            .unwrap();
+        let l1 = KoopmanLayer::lif(&lif, 16, w1, BATCH).unwrap();
+        Network::new(vec![l0, l1], BATCH).unwrap()
+    };
+    let mut rng = StdRng::seed_from_u64(73);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let (inputs, targets) = minibatch(&task, &mut rng);
+
+    let mut net_serial = build();
+    let mut net_threaded = build();
+    let mut tr_serial = Trainer::new(&net_serial, N_CLASSES, TrainConfig::default()).unwrap();
+    let mut tr_threaded = Trainer::new(
+        &net_threaded,
+        N_CLASSES,
+        TrainConfig {
+            threads: 3, // batch 8 → uneven chunks 3/3/2
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+
+    // Forward-only equivalence is exact: columns are independent and each is
+    // computed with identical arithmetic.
+    let lg_serial = tr_serial.logits(&mut net_serial, &inputs).unwrap();
+    let lg_threaded = tr_threaded.logits(&mut net_threaded, &inputs).unwrap();
+    for b in 0..BATCH {
+        for i in 0..N_CLASSES {
+            assert_eq!(
+                lg_serial[(i, b)],
+                lg_threaded[(i, b)],
+                "threaded logits differ at ({i}, {b})"
+            );
+        }
+    }
+
+    let s1 = tr_serial
+        .train_step(&mut net_serial, &inputs, &targets)
+        .unwrap();
+    let s2 = tr_threaded
+        .train_step(&mut net_threaded, &inputs, &targets)
+        .unwrap();
+    assert!((s1.loss - s2.loss).abs() < 1e-12, "loss differs");
+    assert_eq!(s1.accuracy, s2.accuracy, "accuracy differs");
+
+    let close = |a: &Mat<f64>, b: &Mat<f64>, what: &str| {
+        for c in 0..a.ncols() {
+            for i in 0..a.nrows() {
+                let denom = a[(i, c)].abs().max(1.0);
+                assert!(
+                    (a[(i, c)] - b[(i, c)]).abs() <= 1e-12 * denom,
+                    "{what} differs at ({i},{c}): {} vs {}",
+                    a[(i, c)],
+                    b[(i, c)]
+                );
+            }
+        }
+    };
+    for l in 0..net_serial.n_layers() {
+        close(
+            net_serial.layer(l).weights(),
+            net_threaded.layer(l).weights(),
+            "W",
+        );
+        if let (Some(a), Some(b)) = (
+            net_serial.layer(l).recurrent_weights(),
+            net_threaded.layer(l).recurrent_weights(),
+        ) {
+            close(a, b, "W_rec");
+        }
+    }
+    close(tr_serial.readout(), tr_threaded.readout(), "readout");
+}
+
+#[test]
+fn threaded_training_learns_the_task() {
+    // End-to-end: the threaded path must actually train, not just match one
+    // step.
+    let mut rng = StdRng::seed_from_u64(59);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let mut net = build_net(9);
+    let mut trainer = Trainer::new(
+        &net,
+        N_CLASSES,
+        TrainConfig {
+            threads: 4,
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+    let mut losses = Vec::new();
+    for step in 0..200 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.5 * early,
+        "threaded training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+}
+
+#[test]
 fn surrogate_bptt_learns_the_poisson_pattern_task() {
     let mut rng = StdRng::seed_from_u64(17);
     // Two random rate patterns over 24 channels: 0.12 spikes/ms on active

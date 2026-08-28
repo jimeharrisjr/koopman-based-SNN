@@ -83,6 +83,18 @@ impl Network {
         self.batch
     }
 
+    /// Clone the network with a different batch capacity: same layers,
+    /// weights, and dynamics; fresh zeroed state. The trainer's data-parallel
+    /// path uses this to give each thread its own chunk-sized copy.
+    pub fn clone_with_batch(&self, batch: usize) -> Result<Self, SnnError> {
+        let layers: Vec<KoopmanLayer> = self
+            .layers
+            .iter()
+            .map(|l| l.clone_with_batch(batch))
+            .collect::<Result<_, _>>()?;
+        Self::new(layers, batch)
+    }
+
     /// One batched, taped network step: per layer, the pre-reset potentials
     /// land in `v_pre[l]` and the emitted spikes in `s_out[l]` (each
     /// `n_l × batch`). The training tape owns those buffers.
