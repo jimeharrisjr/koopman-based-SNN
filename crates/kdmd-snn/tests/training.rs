@@ -701,6 +701,101 @@ fn trained_readouts_learn_and_engage() {
     }
 }
 
+fn three_layer_net(skip: bool) -> Network {
+    let lif = Lif::new(LifParams {
+        dt: DT,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let mut rng = StdRng::seed_from_u64(131);
+    let w0 = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+    let w1 = Mat::from_fn(24, N_HIDDEN, |_, _| rng.random_range(0.0..1.5));
+    let w2 = Mat::from_fn(16, 24, |_, _| rng.random_range(0.0..1.5));
+    let l0 = KoopmanLayer::lif(&lif, N_HIDDEN, w0, BATCH)
+        .unwrap()
+        .with_recurrent(Mat::zeros(N_HIDDEN, N_HIDDEN))
+        .unwrap();
+    let l1 = KoopmanLayer::lif(&lif, 24, w1, BATCH)
+        .unwrap()
+        .with_recurrent(Mat::zeros(24, 24))
+        .unwrap();
+    let mut l2 = KoopmanLayer::lif(&lif, 16, w2, BATCH)
+        .unwrap()
+        .with_recurrent(Mat::zeros(16, 16))
+        .unwrap();
+    if skip {
+        // Zero-init: exactly the plain chain at step 0 (docs/22 discipline).
+        l2 = l2.with_skip(Mat::zeros(16, N_HIDDEN)).unwrap();
+    }
+    Network::new(vec![l0, l1, l2], BATCH).unwrap()
+}
+
+#[test]
+fn zero_skip_matches_plain_chain_exactly_at_init() {
+    // A zero-initialized skip is the identity move: forward pass and first
+    // training loss must equal the plain three-layer chain bitwise.
+    let mut rng = StdRng::seed_from_u64(137);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let (inputs, targets) = minibatch(&task, &mut rng);
+    let mut net_plain = three_layer_net(false);
+    let mut net_skip = three_layer_net(true);
+    let mut tr_plain = Trainer::new(&net_plain, N_CLASSES, TrainConfig::default()).unwrap();
+    let mut tr_skip = Trainer::new(&net_skip, N_CLASSES, TrainConfig::default()).unwrap();
+    let lg_a = tr_plain.logits(&mut net_plain, &inputs).unwrap();
+    let lg_b = tr_skip.logits(&mut net_skip, &inputs).unwrap();
+    for b in 0..BATCH {
+        for i in 0..N_CLASSES {
+            assert_eq!(lg_a[(i, b)], lg_b[(i, b)], "logits differ at ({i},{b})");
+        }
+    }
+    let sa = tr_plain.train_step(&mut net_plain, &inputs, &targets).unwrap();
+    let sb = tr_skip.train_step(&mut net_skip, &inputs, &targets).unwrap();
+    assert_eq!(sa.loss, sb.loss, "first-step loss differs");
+}
+
+#[test]
+fn skip_connections_grow_from_zero_and_train() {
+    // Training a three-layer net with a zero-init skip must stay finite,
+    // reduce the loss, and actually move the skip weights — proving the new
+    // gradient path works (threaded, so the chunked path is covered too).
+    let mut rng = StdRng::seed_from_u64(139);
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let mut net = three_layer_net(true);
+    let mut trainer = Trainer::new(
+        &net,
+        N_CLASSES,
+        TrainConfig {
+            threads: 2,
+            ..TrainConfig::default()
+        },
+    )
+    .unwrap();
+    let mut losses = Vec::new();
+    for step in 0..250 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.9 * early,
+        "skip training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+    let w_skip = net.layer(2).skip_weights().unwrap();
+    let mut max_abs = 0.0f64;
+    for j in 0..w_skip.ncols() {
+        for i in 0..w_skip.nrows() {
+            max_abs = max_abs.max(w_skip[(i, j)].abs());
+        }
+    }
+    assert!(
+        max_abs > 1e-6,
+        "W_skip never moved from zero — the skip gradient path is dead"
+    );
+}
+
 #[test]
 fn learned_tau_and_attention_compose() {
     // The combination round (docs/18) runs learnable τ and the attention

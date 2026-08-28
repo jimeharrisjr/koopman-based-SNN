@@ -74,6 +74,11 @@ pub struct KoopmanLayer {
     /// Optional recurrent weights (`n_neurons × n_neurons`): the layer's own
     /// spikes from the **previous** step feed back into the drive.
     w_rec: Option<Mat<f64>>,
+    /// Optional skip weights (`n_neurons × n_skip_inputs`): spikes from the
+    /// layer TWO below (same time step) feed into the drive alongside the
+    /// direct input. Zero-initialized skips reproduce the plain chain
+    /// exactly, letting training grow the bypass from nothing (docs/22).
+    w_skip: Option<Mat<f64>>,
     /// The layer's own spikes at the previous step (`n × batch`); episodic
     /// state — cleared by [`reset_recurrent`](Self::reset_recurrent), which
     /// [`Network::reset_state`](crate::Network::reset_state) calls.
@@ -165,6 +170,7 @@ impl KoopmanLayer {
             n_state_vars,
             lif_tau: None,
             w_rec: None,
+            w_skip: None,
             prev_spikes: Mat::zeros(n_neurons, batch),
             y: Mat::zeros(dim, batch),
             drive: Mat::zeros(n_neurons, batch),
@@ -225,6 +231,31 @@ impl KoopmanLayer {
         }
         self.w_rec = Some(w_rec);
         Ok(self)
+    }
+
+    /// Add a skip connection: spikes from the layer two below (same step)
+    /// enter the drive through `w_skip` (`n_neurons × n_skip_inputs`).
+    /// Zero-initializing reproduces the plain chain exactly.
+    pub fn with_skip(mut self, w_skip: Mat<f64>) -> Result<Self, SnnError> {
+        if w_skip.nrows() != self.n_neurons {
+            return Err(SnnError::DimensionMismatch(format!(
+                "skip weights have {} rows, expected n_neurons = {}",
+                w_skip.nrows(),
+                self.n_neurons
+            )));
+        }
+        self.w_skip = Some(w_skip);
+        Ok(self)
+    }
+
+    /// Skip weights, if the layer has them.
+    pub fn skip_weights(&self) -> Option<&Mat<f64>> {
+        self.w_skip.as_ref()
+    }
+
+    /// Mutable skip weights (training updates them).
+    pub fn skip_weights_mut(&mut self) -> Option<&mut Mat<f64>> {
+        self.w_skip.as_mut()
     }
 
     /// Recurrent weights, if the layer has them.
@@ -590,6 +621,13 @@ impl KoopmanLayer {
         s_in: &SpikeVec,
         out: &mut SpikeVec,
     ) -> Result<(), SnnError> {
+        if self.w_skip.is_some() {
+            return Err(SnnError::InvalidParameter(
+                "sparse step does not support skip connections; use the \
+                 batched path"
+                    .into(),
+            ));
+        }
         self.check_state(state, 1)?;
         if s_in.n_neurons() != self.n_inputs() {
             return Err(SnnError::DimensionMismatch(format!(
@@ -676,13 +714,15 @@ impl KoopmanLayer {
 
     /// Batched step with dense spikes (the training-path representation).
     /// Writes this layer's spikes into `out` (overwritten entirely).
+    /// `s_skip` must be given iff the layer has skip weights.
     pub fn step_batch(
         &mut self,
         state: &mut LayerState,
         s_in: &SpikeBatch,
+        s_skip: Option<&SpikeBatch>,
         out: &mut SpikeBatch,
     ) -> Result<(), SnnError> {
-        self.step_batch_impl(state, s_in, out, None)
+        self.step_batch_impl(state, s_in, s_skip, out, None)
     }
 
     /// [`step_batch`](Self::step_batch), additionally saving the **pre-reset**
@@ -692,6 +732,7 @@ impl KoopmanLayer {
         &mut self,
         state: &mut LayerState,
         s_in: &SpikeBatch,
+        s_skip: Option<&SpikeBatch>,
         out: &mut SpikeBatch,
         v_pre: &mut Mat<f64>,
     ) -> Result<(), SnnError> {
@@ -704,16 +745,41 @@ impl KoopmanLayer {
                 state.batch()
             )));
         }
-        self.step_batch_impl(state, s_in, out, Some(v_pre))
+        self.step_batch_impl(state, s_in, s_skip, out, Some(v_pre))
     }
 
     fn step_batch_impl(
         &mut self,
         state: &mut LayerState,
         s_in: &SpikeBatch,
+        s_skip: Option<&SpikeBatch>,
         out: &mut SpikeBatch,
         mut v_pre: Option<&mut Mat<f64>>,
     ) -> Result<(), SnnError> {
+        match (&self.w_skip, s_skip) {
+            (Some(w), Some(s)) => {
+                if s.n_neurons() != w.ncols() || s.batch() != state.batch() {
+                    return Err(SnnError::DimensionMismatch(format!(
+                        "skip spikes are {}×{}, layer expects {}×{}",
+                        s.n_neurons(),
+                        s.batch(),
+                        w.ncols(),
+                        state.batch()
+                    )));
+                }
+            }
+            (Some(_), None) => {
+                return Err(SnnError::InvalidParameter(
+                    "layer has skip weights but no skip input was given".into(),
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(SnnError::InvalidParameter(
+                    "skip input given to a layer without skip weights".into(),
+                ));
+            }
+            (None, None) => {}
+        }
         let batch = state.batch();
         self.check_state(state, batch)?;
         if s_in.n_neurons() != self.n_inputs() || s_in.batch() != batch {
@@ -761,6 +827,21 @@ impl KoopmanLayer {
                     }
                     for i in 0..n {
                         self.drive[(i, b)] += w_rec[(i, j)];
+                    }
+                }
+            }
+        }
+        // 1c. Skip drive from the layer two below (same time step).
+        if let (Some(w_skip), Some(s)) = (&self.w_skip, s_skip) {
+            let sm = s.as_mat();
+            for b in 0..batch {
+                for j in 0..w_skip.ncols() {
+                    let v = sm[(j, b)];
+                    if v == 0.0 {
+                        continue;
+                    }
+                    for i in 0..n {
+                        self.drive[(i, b)] += w_skip[(i, j)] * v;
                     }
                 }
             }
@@ -887,7 +968,7 @@ mod tests {
                 .step(&mut s_state, &s_in, &mut out_sparse)
                 .unwrap();
             batch_layer
-                .step_batch(&mut b_state, &dense_in, &mut out_batch)
+                .step_batch(&mut b_state, &dense_in, None, &mut out_batch)
                 .unwrap();
 
             let batch_active = out_batch.column_to_sparse(0);
@@ -1115,7 +1196,7 @@ mod tests {
         s_in.as_mat_mut()[(0, 0)] = 1.0;
         let mut out = SpikeBatch::zeros(n, batch).unwrap();
         for _ in 0..200 {
-            layer.step_batch(&mut state, &s_in, &mut out).unwrap();
+            layer.step_batch(&mut state, &s_in, None, &mut out).unwrap();
         }
         // Column 0's neuron 0 accumulated drive; column 1 stayed at rest.
         assert!(state.var(1)[(0, 0)] > 0.1);

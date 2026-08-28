@@ -72,6 +72,10 @@ struct ExpConfig {
     /// plus additive noise events. Strengths are fixed constants below,
     /// chosen a priori and untuned.
     augment_extra: bool,
+    /// Zero-initialized skip connections on layers ≥ 2 (docs/22): each such
+    /// layer also reads the layer two below through W_skip, grown from
+    /// nothing by training.
+    skip: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -116,6 +120,7 @@ const BASE: ExpConfig = ExpConfig {
     learn_tau: false,
     readout: TemporalReadout::Count,
     augment_extra: false,
+    skip: false,
 };
 
 /// Adaptation defaults for the ALIF rounds (dt = 10 ms bins): τ_w = 150 ms
@@ -549,7 +554,43 @@ const EXPERIMENTS: &[ExpConfig] = &[
         ensemble: 3,
         ..BASE
     },
+    // Round 10 (docs/22): a third layer on the AK recipe, without and with
+    // its candidate enabler (zero-init skip connections).
+    ExpConfig {
+        tag: "AO",
+        name: "AK recipe + third recurrent layer (no enabler)",
+        n_pooled: 350,
+        hidden: &[256, 256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "AP",
+        name: "AK recipe + third recurrent layer + zero-init skips",
+        n_pooled: 350,
+        hidden: &[256, 256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        skip: true,
+        ..BASE
+    },
 ];
+
+/// Diverse-ensemble members (docs/22, arm AQ): three strong recipes with
+/// different bin widths, readouts, and trained parameters, each trained at
+/// its own config (seed_bump 0) and combined by summed logits.
+const DIVERSE_MEMBERS: &[&str] = &["AK", "AJ", "X"];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
 /// whole-sample channel shift (spectral jitter), and a whole-sample time
@@ -647,6 +688,7 @@ fn build_network(cfg: &ExpConfig, seed_bump: u64) -> Network {
     .unwrap();
     let mut rng = StdRng::seed_from_u64(INIT_SEED + seed_bump);
     let mut layers = Vec::new();
+    let mut widths: Vec<usize> = Vec::new();
     let mut fan_in = cfg.n_pooled;
     for (l, &n) in cfg.hidden.iter().enumerate() {
         // Input layers see dense per-bin activity; hidden layers see sparse
@@ -709,7 +751,12 @@ fn build_network(cfg: &ExpConfig, seed_bump: u64) -> Network {
             // recurrence from nothing (clean attribution).
             layer = layer.with_recurrent(Mat::zeros(n, n)).unwrap();
         }
+        if cfg.skip && l >= 2 {
+            // Zero-init: exactly the plain chain at step 0 (docs/22).
+            layer = layer.with_skip(Mat::zeros(n, widths[l - 2])).unwrap();
+        }
         layers.push(layer);
+        widths.push(n);
         fan_in = n;
     }
     Network::new(layers, BATCH).unwrap()
@@ -722,6 +769,113 @@ struct RunResult {
     final_train_loss: f64,
     train_secs: f64,
     loss_curve: Vec<(usize, f64)>,
+}
+
+fn train_config_for(cfg: &ExpConfig, threads: usize) -> TrainConfig {
+    TrainConfig {
+        weight_decay: cfg.weight_decay,
+        readout_decay: cfg.readout_decay,
+        threads,
+        learn_tau: cfg.learn_tau,
+        readout_mode: match cfg.readout {
+            TemporalReadout::Count => ReadoutMode::Count,
+            TemporalReadout::Static => ReadoutMode::StaticProfile {
+                t_steps: cfg.t_steps,
+            },
+            TemporalReadout::Attention => ReadoutMode::SpikeAttention,
+        },
+        ..TrainConfig::default()
+    }
+}
+
+/// Train one diverse-ensemble member at its own config (no loss curves; the
+/// member recipes use neither lr decay nor balanced sampling).
+fn train_member(cfg: &ExpConfig, train: &[ShdSample], threads: usize) -> (Network, Trainer) {
+    let mut net = build_network(cfg, cfg.seed_bump);
+    let mut trainer = Trainer::new(&net, N_CLASSES, train_config_for(cfg, threads)).unwrap();
+    let mut data_rng = StdRng::seed_from_u64(DATA_SEED + cfg.seed_bump);
+    for step in 0..cfg.minibatches {
+        let mut inputs = zero_inputs(cfg);
+        let mut targets = Vec::with_capacity(BATCH);
+        for b in 0..BATCH {
+            let sample = &train[data_rng.random_range(0..train.len())];
+            targets.push(sample.label);
+            if cfg.augment {
+                let augmented = augment_sample(sample, &mut data_rng, cfg.augment_extra);
+                write_sample(&augmented, &mut inputs, b, cfg).unwrap();
+            } else {
+                write_sample(sample, &mut inputs, b, cfg).unwrap();
+            }
+        }
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        if (step + 1) % 1500 == 0 {
+            println!("    [{}] step {:5}: loss {:.4}", cfg.tag, step + 1, stats.loss);
+        }
+    }
+    (net, trainer)
+}
+
+/// The diverse ensemble (docs/22, arm AQ): one member per DIVERSE_MEMBERS
+/// config, logits summed at evaluation. Members bin the test samples each
+/// their own way, so different time resolutions mix cleanly.
+fn run_diverse_ensemble(train: &[ShdSample], test: &[ShdSample], threads: usize) {
+    println!(
+        "\n### [AQ] diverse ensemble {DIVERSE_MEMBERS:?} — one member each at \
+         seed_bump 0, summed logits, threads {threads}"
+    );
+    let start = Instant::now();
+    let cfgs: Vec<&ExpConfig> = DIVERSE_MEMBERS
+        .iter()
+        .map(|t| {
+            EXPERIMENTS
+                .iter()
+                .find(|e| e.tag == *t)
+                .expect("diverse member tag exists")
+        })
+        .collect();
+    let mut members: Vec<(&ExpConfig, Network, Trainer)> = Vec::new();
+    for cfg in cfgs {
+        println!("  training member [{}] {}", cfg.tag, cfg.name);
+        let (net, trainer) = train_member(cfg, train, threads);
+        members.push((cfg, net, trainer));
+    }
+    let train_secs = start.elapsed().as_secs_f64();
+
+    let (mut correct, mut total) = (0usize, 0usize);
+    for chunk in test.chunks(BATCH) {
+        if chunk.len() < BATCH {
+            break;
+        }
+        let mut sum_logits = Mat::<f64>::zeros(N_CLASSES, BATCH);
+        for (cfg, net, trainer) in members.iter_mut() {
+            let mut inputs = zero_inputs(cfg);
+            for (b, sample) in chunk.iter().enumerate() {
+                write_sample(sample, &mut inputs, b, cfg).unwrap();
+            }
+            let logits = trainer.logits(net, &inputs).unwrap();
+            for b in 0..BATCH {
+                for i in 0..N_CLASSES {
+                    sum_logits[(i, b)] += logits[(i, b)];
+                }
+            }
+        }
+        for (b, sample) in chunk.iter().enumerate() {
+            let mut best = 0usize;
+            for i in 1..N_CLASSES {
+                if sum_logits[(i, b)] > sum_logits[(best, b)] {
+                    best = i;
+                }
+            }
+            if best == sample.label {
+                correct += 1;
+            }
+            total += 1;
+        }
+    }
+    println!(
+        "  RESULT [AQ]: test accuracy {:.4} ({correct}/{total}), train {train_secs:.1}s",
+        correct as f64 / total as f64
+    );
 }
 
 fn run_experiment(
@@ -756,25 +910,7 @@ fn run_experiment(
     for member in 0..cfg.ensemble {
         let bump = cfg.seed_bump + 1000 * member as u64;
         let mut net = build_network(cfg, bump);
-        let mut trainer = Trainer::new(
-            &net,
-            N_CLASSES,
-            TrainConfig {
-                weight_decay: cfg.weight_decay,
-                readout_decay: cfg.readout_decay,
-                threads,
-                learn_tau: cfg.learn_tau,
-                readout_mode: match cfg.readout {
-                    TemporalReadout::Count => ReadoutMode::Count,
-                    TemporalReadout::Static => ReadoutMode::StaticProfile {
-                        t_steps: cfg.t_steps,
-                    },
-                    TemporalReadout::Attention => ReadoutMode::SpikeAttention,
-                },
-                ..TrainConfig::default()
-            },
-        )
-        .unwrap();
+        let mut trainer = Trainer::new(&net, N_CLASSES, train_config_for(cfg, threads)).unwrap();
         let mut data_rng = StdRng::seed_from_u64(DATA_SEED + bump);
         let mut recent = Vec::new();
         for step in 0..cfg.minibatches {
@@ -824,6 +960,18 @@ fn run_experiment(
         if let Some(u) = trainer.attention_query() {
             let linf = (0..u.nrows()).map(|j| u[(j, 0)].abs()).fold(0.0f64, f64::max);
             println!("  readout attention query: max |u| = {linf:.4} (init 0)");
+        }
+        // Skip-connection engagement summary (docs/22 mechanism gate).
+        for l in 0..net.n_layers() {
+            if let Some(ws) = net.layer(l).skip_weights() {
+                let mut max_abs = 0.0f64;
+                for j in 0..ws.ncols() {
+                    for i in 0..ws.nrows() {
+                        max_abs = max_abs.max(ws[(i, j)].abs());
+                    }
+                }
+                println!("  skip layer {l}: max |W_skip| = {max_abs:.4} (init 0)");
+            }
         }
         // Learned-τ summary: where did training move the time constants?
         if cfg.learn_tau {
@@ -954,7 +1102,11 @@ fn main() {
             args.push(a);
         }
     }
-    let selected: Vec<&ExpConfig> = if args.is_empty() {
+    // "AQ" is the diverse-ensemble arm (docs/22) — a multi-config run rather
+    // than an ExpConfig entry.
+    let want_aq = args.iter().any(|a| a == "AQ");
+    args.retain(|a| a != "AQ");
+    let selected: Vec<&ExpConfig> = if args.is_empty() && !want_aq {
         // Default: the six controlled-budget variations A-F.
         EXPERIMENTS.iter().filter(|e| e.tag < "G").collect()
     } else {
@@ -963,7 +1115,7 @@ fn main() {
             .filter(|e| args.iter().any(|a| a == e.tag))
             .collect()
     };
-    if selected.is_empty() {
+    if selected.is_empty() && !want_aq {
         eprintln!("no experiments selected; tags: A..I");
         std::process::exit(1);
     }
@@ -984,6 +1136,9 @@ fn main() {
             run_cfg.seed_bump = cfg.seed_bump + 100 * seed_idx as u64;
             results.push(run_experiment(&run_cfg, &train, &test, n_threads));
         }
+    }
+    if want_aq {
+        run_diverse_ensemble(&train, &test, n_threads);
     }
 
     println!("\n## Summary (chance = {:.3})", 1.0 / N_CLASSES as f64);

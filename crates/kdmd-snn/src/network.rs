@@ -41,6 +41,25 @@ impl Network {
                 )));
             }
         }
+        // Skip connections read the layer two below (same step); they are
+        // meaningless on layers 0 and 1 and must match that layer's width.
+        for (l, layer) in layers.iter().enumerate() {
+            if let Some(w_skip) = layer.skip_weights() {
+                if l < 2 {
+                    return Err(SnnError::InvalidParameter(format!(
+                        "layer {l} has skip weights but no layer two below"
+                    )));
+                }
+                if w_skip.ncols() != layers[l - 2].n_neurons() {
+                    return Err(SnnError::DimensionMismatch(format!(
+                        "layer {l} skip weights read {} inputs, layer {} has {} neurons",
+                        w_skip.ncols(),
+                        l - 2,
+                        layers[l - 2].n_neurons()
+                    )));
+                }
+            }
+        }
         let mut states = Vec::with_capacity(layers.len());
         let mut spike_bufs = Vec::with_capacity(layers.len());
         let mut batch_bufs = Vec::with_capacity(layers.len());
@@ -159,9 +178,15 @@ impl Network {
             }
             let (prev, rest) = self.batch_bufs.split_at_mut(l);
             let s_in = if l == 0 { input } else { &prev[l - 1] };
+            let s_skip = if self.layers[l].skip_weights().is_some() {
+                Some(&prev[l - 2])
+            } else {
+                None
+            };
             self.layers[l].step_batch_taped(
                 &mut self.states[l],
                 s_in,
+                s_skip,
                 &mut rest[0],
                 &mut v_pre[l],
             )?;
@@ -222,7 +247,12 @@ impl Network {
         for l in 0..self.layers.len() {
             let (prev, rest) = self.batch_bufs.split_at_mut(l);
             let s_in = if l == 0 { input } else { &prev[l - 1] };
-            self.layers[l].step_batch(&mut self.states[l], s_in, &mut rest[0])?;
+            let s_skip = if self.layers[l].skip_weights().is_some() {
+                Some(&prev[l - 2])
+            } else {
+                None
+            };
+            self.layers[l].step_batch(&mut self.states[l], s_in, s_skip, &mut rest[0])?;
         }
         Ok(self.batch_bufs.last().unwrap())
     }

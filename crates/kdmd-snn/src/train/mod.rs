@@ -130,6 +130,7 @@ impl Default for TrainConfig {
 struct BatchGrads {
     w: Vec<Mat<f64>>,
     rec: Vec<Option<Mat<f64>>>,
+    skip: Vec<Option<Mat<f64>>>,
     r: Mat<f64>,
     /// Per-layer propagator-entry gradients for learnable τ (`5 × n`, rows
     /// ordered `[α, β, γ, δ, b₂]` to match `lif_entry_grads`); `None` for
@@ -154,7 +155,12 @@ impl BatchGrads {
                 }
             }
         }
-        for (a, b) in self.rec.iter_mut().zip(&other.rec) {
+        for (a, b) in self
+            .rec
+            .iter_mut()
+            .zip(&other.rec)
+            .chain(self.skip.iter_mut().zip(&other.skip))
+        {
             if let (Some(a), Some(b)) = (a.as_mut(), b.as_ref()) {
                 for c in 0..a.ncols() {
                     for i in 0..a.nrows() {
@@ -211,6 +217,8 @@ pub struct Trainer {
     opt_w: Vec<Adam>,
     /// Optimizer state for recurrent weights, per layer (None = feedforward).
     opt_rec: Vec<Option<Adam>>,
+    /// Optimizer state for skip weights, per layer (None = no skip).
+    opt_skip: Vec<Option<Adam>>,
     opt_r: Adam,
     /// Learnable-τ parameters in log-space, per layer (`2 × n`: row 0 =
     /// ln τ_m, row 1 = ln τ_s); `None` for layers without τ metadata.
@@ -240,6 +248,7 @@ impl Trainer {
         });
         let mut opt_w = Vec::with_capacity(net.n_layers());
         let mut opt_rec = Vec::with_capacity(net.n_layers());
+        let mut opt_skip = Vec::with_capacity(net.n_layers());
         let mut tau_rho = Vec::with_capacity(net.n_layers());
         let mut opt_tau = Vec::with_capacity(net.n_layers());
         for l in 0..net.n_layers() {
@@ -249,6 +258,11 @@ impl Trainer {
                 net.layer(l)
                     .recurrent_weights()
                     .map(|wr| Adam::new(wr.nrows(), wr.ncols())),
+            );
+            opt_skip.push(
+                net.layer(l)
+                    .skip_weights()
+                    .map(|ws| Adam::new(ws.nrows(), ws.ncols())),
             );
             let meta = if cfg.learn_tau {
                 net.layer(l).lif_taus()
@@ -312,6 +326,7 @@ impl Trainer {
             r,
             opt_w,
             opt_rec,
+            opt_skip,
             opt_r,
             tau_rho,
             opt_tau,
@@ -721,6 +736,14 @@ impl Trainer {
                     .map(|wr| Mat::zeros(wr.nrows(), wr.ncols()))
             })
             .collect();
+        // Skip-weight gradients, where present.
+        let mut grad_skip: Vec<Option<Mat<f64>>> = (0..n_layers)
+            .map(|l| {
+                net.layer(l)
+                    .skip_weights()
+                    .map(|ws| Mat::zeros(ws.nrows(), ws.ncols()))
+            })
+            .collect();
         // Propagator-entry gradients for learnable τ (rows [α, β, γ, δ, b₂]).
         let mut grad_tau: Vec<Option<Mat<f64>>> = (0..n_layers)
             .map(|l| {
@@ -801,6 +824,21 @@ impl Trainer {
                                 acc += w_next[(i, j)] * d_next[(i, b)];
                             }
                             g_s[(j, b)] += acc;
+                        }
+                    }
+                }
+                // Skip path: layer l+2 also read this layer's spikes at t.
+                if l + 2 < n_layers {
+                    if let Some(w_skip) = net.layer(l + 2).skip_weights() {
+                        let d_next = &dldd[l + 2];
+                        for b in 0..batch {
+                            for j in 0..n {
+                                let mut acc = 0.0;
+                                for i in 0..w_skip.nrows() {
+                                    acc += w_skip[(i, j)] * d_next[(i, b)];
+                                }
+                                g_s[(j, b)] += acc;
+                            }
                         }
                     }
                 }
@@ -895,6 +933,22 @@ impl Trainer {
                         }
                     }
                 }
+                // ∂L/∂W_skip += ∂L/∂d_t · s_{l−2}(t)ᵀ (same-step input;
+                // Network::new guarantees l ≥ 2 when skip weights exist).
+                if let Some(grad) = grad_skip[l].as_mut() {
+                    let s_skip_mat = s_out_tape[t][l - 2].as_mat();
+                    for b in 0..batch {
+                        for j in 0..s_skip_mat.nrows() {
+                            let s = s_skip_mat[(j, b)];
+                            if s == 0.0 {
+                                continue;
+                            }
+                            for i in 0..n {
+                                grad[(i, j)] += dldd[l][(i, b)] * s;
+                            }
+                        }
+                    }
+                }
                 // ∂L/∂W_rec += ∂L/∂d_t · s_own(t−1)ᵀ (t = 0 saw zero
                 // recurrent input — the post-reset convention).
                 if t > 0 {
@@ -927,6 +981,7 @@ impl Trainer {
         Ok(BatchGrads {
             w: grad_w,
             rec: grad_rec,
+            skip: grad_skip,
             r: grad_r,
             tau: grad_tau,
             prof: grad_prof,
@@ -1036,11 +1091,13 @@ impl Trainer {
         let n_layers = net.n_layers();
         let mut grad_w = grads.w.clone();
         let mut grad_rec = grads.rec.clone();
+        let mut grad_skip = grads.skip.clone();
         let mut grad_r = grads.r.clone();
         if let Some(clip) = self.cfg.grad_clip {
             for g in grad_w
                 .iter_mut()
                 .chain(grad_rec.iter_mut().flatten())
+                .chain(grad_skip.iter_mut().flatten())
                 .chain(std::iter::once(&mut grad_r))
             {
                 for b in 0..g.ncols() {
@@ -1057,6 +1114,13 @@ impl Trainer {
             if let (Some(opt), Some(grad)) = (opt_slot.as_mut(), grad_slot.as_ref()) {
                 if let Some(w_rec) = net.layer_mut(l).recurrent_weights_mut() {
                     opt.update(w_rec, grad, &self.cfg.optim);
+                }
+            }
+        }
+        for (l, (opt_slot, grad_slot)) in self.opt_skip.iter_mut().zip(&grad_skip).enumerate() {
+            if let (Some(opt), Some(grad)) = (opt_slot.as_mut(), grad_slot.as_ref()) {
+                if let Some(w_skip) = net.layer_mut(l).skip_weights_mut() {
+                    opt.update(w_skip, grad, &self.cfg.optim);
                 }
             }
         }
