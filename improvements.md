@@ -33,17 +33,15 @@ ensemble, and margins under ~3 points are reported as inconclusive.
    (tag U). New corruptions to try cheaply in the harness: channel dropout,
    additive spike noise, mixup-style event-stream blends. More epochs is a
    dead lever. Promoted by the registered consequence of round 7 (docs/17).
-2. **The combination round** (attention × learned τ × 5 ms bins): after four
-   single-axis literature features came back null/negative *with engaged
-   mechanisms* (adaptation r4, learned τ r6, static profile r7, attention
-   r7), the standing attribution is that the ~4-point gap to 0.90+ lives in
-   joint interactions. One registered round combining the engaged-but-null
-   features is the designated test of that attribution.
-   ✦ *Designed and pre-registered 2026-08-27 (`docs/18`): AK (the full
-   combination) and AL (5 ms bins alone — the missing single-axis cell) on
-   the X recipe, 3 seeds each; frozen additivity formula separates
-   interaction from accumulation; composition test-gated. Awaiting the
-   registered runs.*
+2. **The combination round** (attention × learned τ × 5 ms bins).
+   ✅ *Run 2026-08-27 — POSITIVE and SUPERADDITIVE* (pre-registered
+   docs/18, results docs/19): mean(AK) = 0.8888 ± 0.019, +3.3 over the X
+   control and +5.1 over the additive expectation; AL (5 ms alone) NULL;
+   mechanisms 3/3; predictions 4/4. First campaign run over 0.90 (seed
+   200: 0.9116). **AK is the new default recipe.** The interaction
+   attribution is confirmed: features that were individually null are
+   jointly worth five points. Next registered rounds build on AK:
+   item 1 (augmentation variety) and an AK-recipe ensemble.
 3. **A trained temporal readout.** ⚫ *Run 2026-08-27 — AI NEGATIVE
    (−2.0), AJ NULL (+0.3)* (pre-registered docs/16, results docs/17). Both
    mechanisms engaged; a learned static profile is actively harmful, and

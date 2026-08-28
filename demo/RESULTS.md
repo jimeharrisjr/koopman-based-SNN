@@ -395,3 +395,45 @@ analysis: docs/17.
   alone. The registered consequence: readout axis closes, augmentation
   variety tops the re-ranked list, and one combination round (attention ×
   learned τ × 5 ms bins) is the designated next experiment.
+
+## Round 8 — the combination round (pre-registered: docs/18) — **POSITIVE, SUPERADDITIVE**
+
+The round-7 attribution — that the gap lives in *joint* interactions —
+put to its registered test: AK = attention × learnable τ × 5 ms bins on
+the X recipe; AL = 5 ms bins alone (the missing single-axis cell). Raw
+log: `sweep-AK-AL-log.txt`; full analysis: docs/19.
+
+| arm | seeds | mean ± half-range | Δ vs X mean | verdict |
+|---|---|---|---|---|
+| **AK (combination)** | 0.8812 / 0.8737 / **0.9116** | **0.8888 ± 0.0190** | **+0.0325** | **POSITIVE** |
+| AL (5 ms alone) | 0.8795 / 0.8219 / 0.8429 | 0.8481 ± 0.0288 | −0.0082 | NULL |
+
+- **Superadditive by the frozen formula:** the single-axis effects sum to
+  −1.9 points; the combination delivers +3.3 — mean(AK) beats the additive
+  expectation by +5.1 points. Four features that were individually
+  null-or-negative are jointly worth five points: the interaction
+  hypothesis, confirmed by pre-registered arithmetic.
+- **First run over 0.90 in the campaign's history:** AK seed 200 at
+  **0.9116**, inside the published state-of-the-art band. Honest headline:
+  the 3-seed mean **0.8888**.
+- **Mechanisms 3/3 on both gates**, with a twist: at 5 ms bins under
+  attention, layer-0 τ_m learned *faster* membranes (means 11–24 ms) where
+  round 6's count-readout runs had inflated it to ~80 ms — the same
+  parameter finds different optima in different contexts, which is exactly
+  why it was null alone.
+- **Predictions 4/4** — the campaign's first perfect scorecard.
+
+### Cumulative journey (updated)
+
+| stage | configuration | honest value |
+|---|---|---|
+| original demo | 100 ch, 1 × 128, 600 mb | 0.502 |
+| round 1 (I) | 350 ch, 1 × 256, 3000 mb | 0.680 |
+| round 2 (L) | + recurrent hidden layer | 0.808 |
+| round 3 (R) | + augmentation × budget | 0.850 (Z-audit mean) |
+| round 4 (X) | + second recurrent layer | 0.856 (r6 3-seed mean) |
+| **round 8 (AK)** | **+ attention × learned τ × 5 ms bins** | **0.889 (3-seed mean); best single 0.9116** |
+
+**+38.7 points as a mean-of-seeds number, with the campaign's first entry
+into the published 0.90–0.94 band.** AK is the new default recipe; next
+registered rounds: augmentation variety on top of it, and an AK ensemble.
