@@ -28,11 +28,14 @@ ensemble, and margins under ~3 points are reported as inconclusive.
 
 ## P1 — Accuracy on SHD (closing ~3.5 points to the 0.90–0.94 band)
 
-1. **Augmentation variety — now the top item** (was #3). The budget ceiling
-   is real: 12,000 minibatches overfit even with the current augmentation
-   (tag U). New corruptions to try cheaply in the harness: channel dropout,
-   additive spike noise, mixup-style event-stream blends. More epochs is a
-   dead lever. Promoted by the registered consequence of round 7 (docs/17).
+1. **Augmentation variety.** ⚫ *Run 2026-08-28 — NEGATIVE at the tested
+   operating point* (pre-registered docs/20, results docs/21): AK + channel
+   blocks/time masks/noise events lost 1.6 pts with the manipulation check
+   passed (train loss ~2×) — the untuned strengths destroy signal rather
+   than regularize. Axis closed at this operating point; softer strengths
+   would need a new registration. Companion result: **the AK ensemble ×3
+   (AN) hit exactly 0.9000 — the campaign's first honest number in the
+   published band.**
 2. **The combination round** (attention × learned τ × 5 ms bins).
    ✅ *Run 2026-08-27 — POSITIVE and SUPERADDITIVE* (pre-registered
    docs/18, results docs/19): mean(AK) = 0.8888 ± 0.019, +3.3 over the X

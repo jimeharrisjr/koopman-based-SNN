@@ -437,3 +437,37 @@ log: `sweep-AK-AL-log.txt`; full analysis: docs/19.
 **+38.7 points as a mean-of-seeds number, with the campaign's first entry
 into the published 0.90–0.94 band.** AK is the new default recipe; next
 registered rounds: augmentation variety on top of it, and an AK ensemble.
+
+## Round 9 — augmentation variety + AK ensemble (pre-registered: docs/20) — **AM NEGATIVE, AN 0.9000**
+
+Both registered follow-ups to round 8, on the AK default recipe. Raw
+logs: `sweep-AM-log.txt`, `sweep-AN-log.txt`; full analysis: docs/21.
+
+| run | result | Δ vs AK mean | verdict |
+|---|---|---|---|
+| AM (+ channel-block / time-mask / noise corruptions) | mean 0.8729 ± 0.0058 | −0.0159 | **NEGATIVE** |
+| AN (ensemble ×3 of AK) | **0.9000** (2016/2240) | +0.0112 | **POSITIVE — milestone** |
+
+- **The 0.90 milestone fired at exactly its threshold** — 2016 of 2,240,
+  not one sample to spare; the flag's rule was frozen before the run. The
+  campaign's honest, variance-reduced headline is now **0.9000**.
+- **AM is an informative negative:** the manipulation check passed (train
+  loss ~2× AK's), so the corruptions engaged — and cost 1.6 points. At
+  these untuned strengths, extra variety destroys signal rather than
+  regularizing; the axis closes at this operating point.
+- Predictions 3/4 (V1 refuted, V2–V4 confirmed).
+
+### Final campaign scoreboard (nine rounds)
+
+| headline | value |
+|---|---|
+| honest, variance-reduced | **0.9000** (AN, ensemble ×3 of AK) |
+| honest mean-of-3-seeds | 0.8888 ± 0.0190 (AK) |
+| best single run | 0.9116 (AK seed 200) |
+| starting point | 0.502 |
+
+Every accuracy axis on the improvements-plan list now carries a registered
+outcome. The recipe that got here: two recurrent 256-neuron LIF layers
+with learnable per-neuron time constants, spike-driven temporal attention
+over 5 ms bins, standard three-way augmentation, exact-propagator
+dynamics, hand-rolled surrogate BPTT — on a laptop.
