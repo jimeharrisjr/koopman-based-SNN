@@ -471,3 +471,40 @@ outcome. The recipe that got here: two recurrent 256-neuron LIF layers
 with learnable per-neuron time constants, spike-driven temporal attention
 over 5 ms bins, standard three-way augmentation, exact-propagator
 dynamics, hand-rolled surrogate BPTT — on a laptop.
+
+## Round 10 — depth's enabler + diverse ensemble (pre-registered: docs/22) — **skips CONFIRMED as enabler; AQ 0.9179**
+
+The last two P1 items. New library support: zero-init skip connections
+(`with_skip`, layers ≥ 2 read the layer two below; bitwise the plain
+chain at init) with a new BPTT credit path, and a diverse-ensemble runner
+mixing configs with different bin widths and readouts. Raw logs:
+`sweep-AO-AP-log.txt`, `sweep-AQ-log.txt`; full analysis: docs/23.
+
+| run | result | comparison | verdict |
+|---|---|---|---|
+| AO (3rd layer, plain) | mean 0.8637 ± 0.0333 | −0.0251 vs AK | **NEGATIVE** |
+| AP (3rd layer + skips) | mean 0.8935 ± 0.0152 | +0.0047 vs AK · **+0.0298 vs AO** | **NULL vs AK; ENABLER CONFIRMED** |
+| AQ (diverse ensemble {AK, AJ, X}) | **0.9179** (2056/2240) | +0.0179 vs AN | **DIVERSITY WINS** |
+
+- **Skips rescue depth (+3.0 over the plain third layer, W_skip grown to
+  3.6–4.4 in 3/3) but enabled depth only ties two layers** — the depth
+  axis closes at this scale with a validated mechanism in hand. AP's
+  0.8935 is quietly the campaign's best 3-seed mean; two members crossed
+  0.90.
+- **The diverse ensemble is the shock of the round: 0.9179 from members
+  averaging 0.873** — three points above its own best member, +1.8 over
+  the homogeneous AN. Decorrelation across readouts/bin-widths beats
+  member strength; prediction W4 refuted in the favorable direction.
+
+### FINAL campaign scoreboard (ten rounds)
+
+| headline | value |
+|---|---|
+| **best honest number** | **0.9179** (AQ, diverse ensemble) |
+| homogeneous ensemble | 0.9000 (AN) |
+| best 3-seed mean | 0.8935 (AP) / 0.8888 (AK) |
+| best single training run | 0.9116 (AK seed 200) |
+| starting point | 0.502 |
+
+**The P1 accuracy program concludes: 0.502 → 0.9179**, the last five
+rounds fully pre-registered with frozen rules and every negative kept.

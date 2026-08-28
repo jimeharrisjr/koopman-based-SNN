@@ -58,14 +58,23 @@ ensemble, and margins under ~3 points are reported as inconclusive.
    (τ distributions spread across the full clamp range). Implementation
    ships in the library (`learn_tau`, inert when off). Returns in the
    combination round (item 2).
-5. **Depth's enabling ingredient.** A third layer lost ~2 pts at 1.5× cost
-   (tag AE); the pattern all campaign is that each depth increment needs a
-   new ingredient. One focused experiment each: per-layer learning rates,
-   skip connections, a normalization analog. Not a sweep.
-6. **Diverse ensembles.** Same-architecture members correlate too much (AF
-   bought robustness, not a leap). Ensemble *different* recipes: one-layer,
-   two-layer, attention-readout (its tight seed spread makes it a natural
-   ensemble member), 5 ms bins.
+5. **Depth's enabling ingredient.** ◑ *Run 2026-08-28 — ENABLER CONFIRMED,
+   depth axis closed* (pre-registered docs/22, results docs/23): a plain
+   third layer on AK loses 2.5 pts (AE replicated); zero-init skip
+   connections recover 3.0 of them (W_skip grown to 3.6–4.4, gate 3/3) but
+   enabled depth only ties two layers (+0.5, NULL). Skips ship validated
+   in the library (`with_skip`) for any larger-scale attempt.
+6. **Diverse ensembles.** ✅ *Run 2026-08-28 — DIVERSITY WINS, new campaign
+   headline* (docs/22–23): {AK, AJ, X} summed logits = **0.9179**, three
+   points above its best member and +1.8 over the homogeneous AN, from
+   members averaging just 0.873. Decorrelation across readouts and bin
+   widths beats member strength. Eligible registered follow-up: diversity
+   WITH member strength.
+
+**P1 status: CONCLUDED (2026-08-28).** Every item carries a registered
+outcome; campaign scoreboard 0.502 → **0.9179**. Remaining open work: P2
+(parallel-in-time, snnTorch baseline), P3 (identification science), and
+the paper revision (draft still ends at round 5's 0.88).
 
 ## P2 — Library engineering
 
