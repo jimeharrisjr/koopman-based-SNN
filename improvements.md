@@ -105,19 +105,29 @@ the adLIF gate, `baselines/`).
 
 ## P3 — Science: identification and the Koopman side
 
-1. **Reduced-order models in the spiking regime.** The rank-r compression
-   (V1) is validated only sub-threshold (≤ 10 % rollout RMSE,
-   `tests/reduced_order.rs`). Extending it across spikes is the best-posed
-   open problem the project owns; the paper (§6) names it first.
-2. **V4 spectral-regularization experiment.** Constrain fitted eigenvalues
-   toward the unit circle and *measure* whether credit-assignment horizons
-   lengthen. Converts the corrected gradient claim (paper §4.5: diagnosis,
-   not prevention) into a positive, testable hypothesis. Pre-register it.
-3. **Probe-richness quantification.** The paper's identification experiments
-   (§3.2) show excitation dominates identifiability (constant drive →
-   cond(X) ~ 1e19, unrecoverable). The minimal probe richness for a given
-   network scale is unquantified; a small study would make the
-   identification API's requirements concrete.
+1. **Reduced-order models in the spiking regime.** ✅ *Measured 2026-08-28*
+   (docs/25–26, S-C): the rate law is **inverted** from the docs/01
+   prediction — ROM fidelity *improves* with firing rate (half-state ROM:
+   coincidence 0.18 → 0.41 → 0.95 at 3.6/8/20% rates). Spiking ROMs fail
+   hardest in the sparse regime where SNNs are prized; viable for
+   high-rate, rate-level questions. The V1 frontier is mapped.
+2. **V4 spectral-regularization experiment.** ✅ *Measured and closed as
+   originally posed 2026-08-28* (S-B): a two-regime law. Sub-threshold,
+   backward decay tracks the spectral prediction (0.93–0.97 α, monotone
+   in τ, horizon ratio 3.45×). In operation, surrogate/reset factors and
+   *learned recurrence* dominate — τ=10 measured ρ̂ = 1.02 α, above the
+   leak bound. The horizon lever is the recurrent-weight spectrum, not
+   the neuron spectrum; instrumentation ships
+   (`TrainConfig::record_grad_norms`).
+3. **Probe-richness quantification.** ✅ *Measured 2026-08-28* (S-A, 4/4
+   predictions): full identification needs all N input directions driven —
+   a four-order-of-magnitude cliff at m = N — while the excited subspace
+   is learned to ~1e-6 even at m = 1. Under-probed fits are trustworthy
+   exactly on the subspace the data visited, and garbage elsewhere.
+**P3 status: CONCLUDED as scoped (2026-08-28)** — items 1–3 measured
+(docs/25–26), each correcting or sharpening a docs/01 claim; items 4–5
+below remain closed/moot by standing decision.
+
 4. **Nonlinear-surrogate track — reopen only with the two named
    ingredients.** V2/V2b closed as pre-registered failures (`docs/05`,
    `docs/08`). The record points at exactly two missing pieces: a dedicated

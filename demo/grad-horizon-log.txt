@@ -1,0 +1,37 @@
+   Compiling kdmd-snn v0.1.0 (/Users/jimharris/Documents/kdmd-SNN/crates/kdmd-snn)
+    Finished `release` profile [optimized] target(s) in 0.38s
+     Running `target/release/examples/grad_horizon silent`
+S-B gradient-horizon measurement: N = 64, T = 60, batch 16, 30 train steps per tau, regime: SILENT (0.6 scale)
+tau_m | alpha (pred) | AR(1) rho | log-slope rho | rho/alpha | activity
+  tau 10: calibrated input scale 0.6
+  tau 10: loss 0.6931 -> 0.6931
+   10 |       0.9048 |    0.8563 |        1.0948 |     0.946 | 0.0000
+  tau 20: calibrated input scale 0.6
+  tau 20: loss 0.6931 -> 0.6931
+   20 |       0.9512 |    0.8820 |        1.1132 |     0.927 | 0.0000
+  tau 40: calibrated input scale 0.6
+  tau 40: loss 0.6931 -> 0.6931
+   40 |       0.9753 |    0.9313 |        1.1300 |     0.955 | 0.0000
+  tau 80: calibrated input scale 0.6
+  tau 80: loss 0.6931 -> 0.6931
+   80 |       0.9876 |    0.9560 |        1.1417 |     0.968 | 0.0000
+
+PB1: measured rho <= alpha; PB2: horizon grows with tau_m; PB3: rho within [0.5*alpha, alpha].
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Running `target/release/examples/grad_horizon`
+S-B gradient-horizon measurement: N = 64, T = 60, batch 16, 30 train steps per tau, regime: ACTIVE (calibrated)
+tau_m | alpha (pred) | AR(1) rho | log-slope rho | rho/alpha | activity
+  tau 10: calibrated input scale 1.5
+  tau 10: loss 0.6930 -> 0.5221
+   10 |       0.9048 |    0.9240 |        1.0820 |     1.021 | 0.0860
+  tau 20: calibrated input scale 2.1
+  tau 20: loss 0.6937 -> 0.5990
+   20 |       0.9512 |    0.9007 |        1.0560 |     0.947 | 0.0171
+  tau 40: calibrated input scale 3.5
+  tau 40: loss 0.6931 -> 0.6273
+   40 |       0.9753 |    0.8584 |        1.0567 |     0.880 | 0.0164
+  tau 80: calibrated input scale 4.4
+  tau 80: loss 0.6931 -> 0.6796
+   80 |       0.9876 |    0.7392 |        1.0396 |     0.749 | 0.0033
+
+PB1: measured rho <= alpha; PB2: horizon grows with tau_m; PB3: rho within [0.5*alpha, alpha].

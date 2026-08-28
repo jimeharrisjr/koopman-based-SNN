@@ -77,6 +77,11 @@ pub struct TrainConfig {
     /// Temporal aggregation of the readout (see [`ReadoutMode`]).
     /// `readout_decay` is only valid with `ReadoutMode::Count`.
     pub readout_mode: ReadoutMode,
+    /// Record per-step backward gradient norms (docs/25 S-B): after each
+    /// train_step, [`Trainer::grad_norms`] holds, per layer and time step,
+    /// the batch-mean L2 norm of λ_t = ∂L/∂x_t. Single-threaded path only
+    /// (the chunked path leaves it `None`); costs one norm per layer-step.
+    pub record_grad_norms: bool,
 }
 
 /// Learnable-τ clamp bounds (ms) — see [`TrainConfig::learn_tau`].
@@ -119,6 +124,7 @@ impl Default for TrainConfig {
             threads: 1,
             learn_tau: false,
             readout_mode: ReadoutMode::Count,
+            record_grad_norms: false,
         }
     }
 }
@@ -141,6 +147,8 @@ struct BatchGrads {
     prof: Option<Mat<f64>>,
     /// Attention-query gradient (`n_out × 1`), when that mode is on.
     attn_u: Option<Mat<f64>>,
+    /// Per-layer, per-step batch-mean ‖λ_t‖₂ (record_grad_norms only).
+    grad_norms: Option<Vec<Vec<f64>>>,
     /// Unnormalized Σ_b per-sample loss.
     loss_sum: f64,
     correct: usize,
@@ -230,6 +238,9 @@ pub struct Trainer {
     /// Attention query `n_out × 1` (SpikeAttention mode; init 0).
     attn_u: Option<Mat<f64>>,
     opt_attn: Option<Adam>,
+    /// Gradient-norm tape from the most recent single-threaded train_step
+    /// (record_grad_norms only): `[layer][t]` batch-mean ‖λ_t‖₂.
+    last_grad_norms: Option<Vec<Vec<f64>>>,
 }
 
 impl Trainer {
@@ -334,7 +345,15 @@ impl Trainer {
             opt_prof,
             attn_u,
             opt_attn,
+            last_grad_norms: None,
         })
+    }
+
+    /// The per-step backward gradient norms from the most recent
+    /// single-threaded train_step (`[layer][t]`), when
+    /// [`TrainConfig::record_grad_norms`] is set.
+    pub fn grad_norms(&self) -> Option<&Vec<Vec<f64>>> {
+        self.last_grad_norms.as_ref()
     }
 
     /// The learned static temporal profile (StaticProfile mode).
@@ -752,6 +771,11 @@ impl Trainer {
                     .map(|_| Mat::zeros(5, net.layer(l).n_neurons()))
             })
             .collect();
+        // Gradient-norm tape (docs/25 S-B).
+        let mut norm_tape: Option<Vec<Vec<f64>>> = self
+            .cfg
+            .record_grad_norms
+            .then(|| vec![vec![0.0; t_steps]; n_layers]);
         // Trained-readout gradients, where those modes are active.
         let mut grad_prof: Option<Mat<f64>> =
             self.w_prof.as_ref().map(|w| Mat::zeros(1, w.ncols()));
@@ -972,6 +996,19 @@ impl Trainer {
                     lambda[l].as_mut(),
                     false,
                 );
+                // (S-B) batch-mean ‖λ_t‖₂ for this layer at step t.
+                if let Some(tape) = norm_tape.as_mut() {
+                    let lam = &lambda[l];
+                    let mut acc = 0.0;
+                    for b in 0..batch {
+                        let mut sq = 0.0;
+                        for i in 0..lam.nrows() {
+                            sq += lam[(i, b)] * lam[(i, b)];
+                        }
+                        acc += sq.sqrt();
+                    }
+                    tape[l][t] = acc / batch as f64;
+                }
             }
             if let Some(kappa) = self.cfg.readout_decay {
                 readout_scale *= kappa;
@@ -986,6 +1023,7 @@ impl Trainer {
             tau: grad_tau,
             prof: grad_prof,
             attn_u: grad_attn,
+            grad_norms: norm_tape,
             loss_sum,
             correct,
         })
@@ -1010,11 +1048,12 @@ impl Trainer {
             )));
         }
         let threads = self.cfg.threads.max(1).min(batch);
-        let grads = if threads == 1 {
+        let mut grads = if threads == 1 {
             self.forward_backward(net, inputs, targets, batch)?
         } else {
             self.chunked_grads(net, inputs, targets, threads)?
         };
+        self.last_grad_norms = grads.grad_norms.take();
         self.apply_update(net, &grads);
         Ok(StepStats {
             loss: grads.loss_sum / batch as f64,
@@ -1082,6 +1121,9 @@ impl Trainer {
         for r in iter {
             total.add(&r?);
         }
+        // Norm tapes are per-chunk and not meaningfully summable; the
+        // documented contract is single-threaded-only recording.
+        total.grad_norms = None;
         Ok(total)
     }
 
