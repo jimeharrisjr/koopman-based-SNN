@@ -587,10 +587,16 @@ const EXPERIMENTS: &[ExpConfig] = &[
     },
 ];
 
-/// Diverse-ensemble members (docs/22, arm AQ): three strong recipes with
-/// different bin widths, readouts, and trained parameters, each trained at
-/// its own config (seed_bump 0) and combined by summed logits.
-const DIVERSE_MEMBERS: &[&str] = &["AK", "AJ", "X"];
+/// Diverse-ensemble arms: each is a list of member tags, one member per
+/// config (seed_bump 0), combined by summed logits.
+/// AQ (docs/22): diversity with weak members. AR/AS (docs/27): diversity
+/// with member strength — AR swaps AQ's weakest member (AJ) for the
+/// strongest recipe (AP); AS keeps both.
+const DIVERSE_ARMS: &[(&str, &[&str])] = &[
+    ("AQ", &["AK", "AJ", "X"]),
+    ("AR", &["AK", "AP", "X"]),
+    ("AS", &["AK", "AP", "AJ", "X"]),
+];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
 /// whole-sample channel shift (spectral jitter), and a whole-sample time
@@ -818,13 +824,19 @@ fn train_member(cfg: &ExpConfig, train: &[ShdSample], threads: usize) -> (Networ
 /// The diverse ensemble (docs/22, arm AQ): one member per DIVERSE_MEMBERS
 /// config, logits summed at evaluation. Members bin the test samples each
 /// their own way, so different time resolutions mix cleanly.
-fn run_diverse_ensemble(train: &[ShdSample], test: &[ShdSample], threads: usize) {
+fn run_diverse_ensemble(
+    tag: &str,
+    members: &[&str],
+    train: &[ShdSample],
+    test: &[ShdSample],
+    threads: usize,
+) {
     println!(
-        "\n### [AQ] diverse ensemble {DIVERSE_MEMBERS:?} — one member each at \
+        "\n### [{tag}] diverse ensemble {members:?} — one member each at \
          seed_bump 0, summed logits, threads {threads}"
     );
     let start = Instant::now();
-    let cfgs: Vec<&ExpConfig> = DIVERSE_MEMBERS
+    let cfgs: Vec<&ExpConfig> = members
         .iter()
         .map(|t| {
             EXPERIMENTS
@@ -873,7 +885,7 @@ fn run_diverse_ensemble(train: &[ShdSample], test: &[ShdSample], threads: usize)
         }
     }
     println!(
-        "  RESULT [AQ]: test accuracy {:.4} ({correct}/{total}), train {train_secs:.1}s",
+        "  RESULT [{tag}]: test accuracy {:.4} ({correct}/{total}), train {train_secs:.1}s",
         correct as f64 / total as f64
     );
 }
@@ -1102,10 +1114,15 @@ fn main() {
             args.push(a);
         }
     }
-    // "AQ" is the diverse-ensemble arm (docs/22) — a multi-config run rather
-    // than an ExpConfig entry.
-    let want_aq = args.iter().any(|a| a == "AQ");
-    args.retain(|a| a != "AQ");
+    // Diverse-ensemble arms (docs/22 AQ; docs/27 AR/AS) — multi-config runs
+    // rather than ExpConfig entries.
+    let wanted_arms: Vec<(&str, &[&str])> = DIVERSE_ARMS
+        .iter()
+        .filter(|(t, _)| args.iter().any(|a| a == t))
+        .copied()
+        .collect();
+    args.retain(|a| !DIVERSE_ARMS.iter().any(|(t, _)| t == a));
+    let want_aq = !wanted_arms.is_empty();
     let selected: Vec<&ExpConfig> = if args.is_empty() && !want_aq {
         // Default: the six controlled-budget variations A-F.
         EXPERIMENTS.iter().filter(|e| e.tag < "G").collect()
@@ -1137,8 +1154,8 @@ fn main() {
             results.push(run_experiment(&run_cfg, &train, &test, n_threads));
         }
     }
-    if want_aq {
-        run_diverse_ensemble(&train, &test, n_threads);
+    for (tag, members) in &wanted_arms {
+        run_diverse_ensemble(tag, members, &train, &test, n_threads);
     }
 
     println!("\n## Summary (chance = {:.3})", 1.0 / N_CLASSES as f64);
