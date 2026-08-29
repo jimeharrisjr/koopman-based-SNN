@@ -35,8 +35,8 @@ id="spiking-neural-networks-as-linear-systems-with-control-dmdc-identification-e
 Neural Networks as Linear Systems with Control: DMDc Identification,
 Exact Propagators, and Surrogate-Gradient Training on the Spiking
 Heidelberg Digits</h1>
-<p><strong>James Harris</strong> <em>Draft v2 — August 2026 (revised
-with campaign rounds 6–10 and the measurement studies of
+<p><strong>James Harris</strong> <em>Draft v2.1 — August 2026 (revised
+with campaign rounds 6–11 and the measurement studies of
 docs/25–26)</em></p>
 <p>Code, logs, and pre-registered protocols: <a
 href="https://github.com/jimeharrisjr/koopman-based-SNN"
@@ -69,21 +69,25 @@ results on lifted linear surrogates of genuinely nonlinear neuron
 models, joined by a mapped feasibility frontier for reduced-order
 spiking rollouts whose rate dependence inverts our own registered
 prediction. Finally, we show that the exact formulation supports
-practical learning. A ten-round experimental campaign on the Spiking
-Heidelberg Digits (SHD) — the last five rounds pre-registered with
-frozen decision rules, the protocol commit pushed before each run —
-takes hand-rolled surrogate-gradient training from 50.2% to an honest
-91.8% (a diverse three-recipe ensemble), with a 3-seed-mean best recipe
-at 88.9% and a best single run of 91.2%, inside the published
+practical learning. An eleven-round experimental campaign on the Spiking
+Heidelberg Digits (SHD) — the last six rounds pre-registered with frozen
+decision rules, the protocol commit pushed before each run — takes
+hand-rolled surrogate-gradient training from 50.2% to an honest
+<strong>93.7%</strong> (an ensemble of three strong, architecturally
+diverse recipes), with a 3-seed-mean best recipe at 89.4% and a best
+single run of 91.2%, in the upper region of the published
 state-of-the-art band. The campaign’s structure is its second
 contribution: four literature-billed features (adaptation, learned time
 constants, static and attention readouts) each measured null-or-negative
 <em>in isolation</em> with their mechanisms demonstrably engaged, then
 proved jointly worth five points by a frozen superadditivity test — the
-gap lived in interactions all along. A seed audit (±2.7 to ±3.6 points
-across weight initializations) disciplines every claim. All training
-runs on a laptop CPU, and every number reported here has a log file in
-the repository.</p>
+gap lived in interactions all along — and a three-step ensemble ladder
+(homogeneous 0.900 &lt; diverse-weak 0.918 &lt; diverse-strong 0.937)
+showing member strength and member diversity are complements, not
+substitutes. A seed audit (±2.7 to ±3.6 points across weight
+initializations) disciplines every claim. All training runs on a laptop
+CPU, and every number reported here has a log file in the
+repository.</p>
 <hr />
 <h2 id="introduction">1 Introduction</h2>
 <p>Spiking neural networks (SNNs) replace the dense synchronous
@@ -131,8 +135,8 @@ a cliff at full input rank.</p></li>
 <li><p><strong>Trainable exactness.</strong> Surrogate-gradient
 backpropagation through time, with the surrogate as the <em>only</em>
 approximation in the training loop, trains these networks on real
-neuromorphic data (§5) — culminating in an honest 0.918 on SHD, inside
-the published state-of-the-art band.</p></li>
+neuromorphic data (§5) — culminating in an honest 0.937 on SHD, in the
+upper region of the published state-of-the-art band.</p></li>
 </ol>
 <p>The paper is organized to be as useful to a skeptic as to an
 enthusiast. Section 2 gives the theory. Section 3 presents
@@ -845,6 +849,11 @@ class="math inline">\(W_{\mathrm{rec}}\)</span> zero-init)</td>
 <td>diverse ensemble {AK, AJ, X}</td>
 <td><strong>0.918</strong></td>
 </tr>
+<tr>
+<td>Round 11 (AR)</td>
+<td>diverse ensemble of the strongest recipes {AK, AP, X}</td>
+<td><strong>0.937</strong></td>
+</tr>
 </tbody>
 </table>
 <p>*The first demo evaluated on a 512-sample subset; all subsequent
@@ -884,16 +893,17 @@ the test results.</figcaption>
 </figure>
 <figure>
 <img src="figures/fig10-campaign.png"
-alt="Figure 10. The ten-round campaign against the published landscape. Shaded bands mark the approximate published ranges on SHD for feedforward SNNs (0.48–0.71), recurrent SNNs (0.71–0.83), and the augmented/adaptive state of the art (0.90–0.94). Points are honest values (3-seed means where audited; error bars show the measured seed spreads); the flat segment at rounds 5–7 is the audits and the single-axis nulls of §5.5. The final three rungs — the superadditive combination, its homogeneous ensemble, and the diverse ensemble — enter the published band." />
-<figcaption aria-hidden="true"><strong>Figure 10.</strong> The ten-round
-campaign against the published landscape. Shaded bands mark the
-approximate published ranges on SHD for feedforward SNNs (0.48–0.71),
-recurrent SNNs (0.71–0.83), and the augmented/adaptive state of the art
-(0.90–0.94). Points are honest values (3-seed means where audited; error
-bars show the measured seed spreads); the flat segment at rounds 5–7 is
-the audits and the single-axis nulls of §5.5. The final three rungs —
-the superadditive combination, its homogeneous ensemble, and the diverse
-ensemble — enter the published band.</figcaption>
+alt="Figure 10. The eleven-round campaign against the published landscape. Shaded bands mark the approximate published ranges on SHD for feedforward SNNs (0.48–0.71), recurrent SNNs (0.71–0.83), and the augmented/adaptive state of the art (0.90–0.94). Points are honest values (3-seed means where audited; error bars show the measured seed spreads); the flat segment at rounds 5–7 is the audits and the single-axis nulls of §5.5. The final four rungs — the superadditive combination, its homogeneous ensemble, and the two diverse ensembles — climb through the published band." />
+<figcaption aria-hidden="true"><strong>Figure 10.</strong> The
+eleven-round campaign against the published landscape. Shaded bands mark
+the approximate published ranges on SHD for feedforward SNNs
+(0.48–0.71), recurrent SNNs (0.71–0.83), and the augmented/adaptive
+state of the art (0.90–0.94). Points are honest values (3-seed means
+where audited; error bars show the measured seed spreads); the flat
+segment at rounds 5–7 is the audits and the single-axis nulls of §5.5.
+The final four rungs — the superadditive combination, its homogeneous
+ensemble, and the two diverse ensembles — climb through the published
+band.</figcaption>
 </figure>
 <h3 id="the-audit-seed-noise-and-what-survives-it">5.4 The audit: seed
 noise, and what survives it</h3>
@@ -933,9 +943,8 @@ members’ errors too correlated for voting to buy more. A later audit
 spread at ±3.6 points across seeds — wider still than the one-layer band
 — so all seed-noise discipline below uses per-recipe measured
 spreads.</p>
-<h3
-id="rounds-six-through-ten-single-axes-fail-the-combination-pays">5.5
-Rounds six through ten: single axes fail, the combination pays</h3>
+<h3 id="rounds-six-through-eleven-single-axes-fail-combinations-pay">5.5
+Rounds six through eleven: single axes fail, combinations pay</h3>
 <p>The features separating this recipe from the published 0.90+ systems
 were then implemented and tested one axis at a time, each under a frozen
 protocol with ±1.5-point decision bands, a 3-seed minimum, and a
@@ -973,7 +982,7 @@ learned <em>faster</em> membranes (means 11–24 ms), where round 6’s
 count-readout runs had inflated the same parameters toward the 100 ms
 clamp — the same learnable feature finds different optima in different
 contexts, which is exactly why it was worthless alone.</p>
-<p><strong>Rounds 9–10 banked the result.</strong> A homogeneous
+<p><strong>Rounds 9–11 banked the result.</strong> A homogeneous
 ensemble of three combination-recipe members evaluated at exactly
 <strong>0.9000</strong> (2,016/2,240 — the pre-registered milestone flag
 fired with zero samples to spare), while harder augmentation on the same
@@ -981,26 +990,37 @@ recipe was an informative negative (engaged, −1.6). A third layer
 remained negative (−2.5) unless bypassed by zero-initialized skip
 connections, which recovered +3.0 — the enabler confirmed by its own
 frozen comparison — yet enabled depth only tied two layers, closing the
-depth axis with the mechanism in hand. The campaign’s final and largest
-surprise was the <strong>diverse ensemble</strong>: one member each of
-the combination, attention-only, and vanilla recipes — mean member
-strength just 0.873 — summed logits to <strong>0.9179</strong>, three
-points above its own best member and 1.8 above the homogeneous ensemble.
-Decorrelation across readouts and time resolutions beat member strength,
-refuting our registered prediction in the favorable direction.</p>
+depth axis with the mechanism in hand. The campaign’s largest surprise
+was the <strong>diverse ensemble</strong>: one member each of the
+combination, attention-only, and vanilla recipes — mean member strength
+just 0.873 — summed logits to <strong>0.9179</strong>, three points
+above its own best member and 1.8 above the homogeneous ensemble,
+refuting our registered prediction in the favorable direction. The
+registered follow-up then combined diversity <em>with</em> strength:
+swapping the weakest member for the skip-enabled three-layer recipe
+(every member draw known in advance by determinism and disclosed in the
+protocol) reached <strong>0.9366</strong>, firing a pre-registered
+milestone at the 0.92 target round 5 had set and missed — while adding
+the weak member back <em>cost</em> 0.3 points. Across three registered
+ensembles the law is clean: homogeneous-strong 0.900 &lt; diverse-weak
+0.918 &lt; diverse-strong 0.937. <strong>Member strength and member
+diversity are complements, not substitutes</strong>: an ensemble buys
+the most when its members are strong <em>and</em> fail differently, and
+its weakest member sets a soft floor on what its vote is worth.</p>
 <h3 id="where-this-lands">5.6 Where this lands</h3>
 <p>A network of subtractive-reset LIF neurons trained by hand-rolled
-surrogate BPTT on a laptop reaches an honest <strong>0.918</strong> on
-SHD — inside the published state-of-the-art band (0.90–0.94) — via a
-recipe whose every ingredient carries a registered, mechanism-gated
-verdict: two recurrent 256-neuron layers, learnable per-neuron time
-constants, spike-driven temporal attention, 5 ms bins, three-way
-augmentation, and ensemble diversity. The methodological finding is
-worth as much as the number: four literature-billed features were
-individually null or negative <em>with their mechanisms engaged</em>,
-and jointly worth five points by a frozen superadditivity test.
-Single-axis ablation, the field’s default evidence style, would have
-rejected every ingredient of the final recipe.</p>
+surrogate BPTT on a laptop reaches an honest <strong>0.937</strong> on
+SHD — the upper region of the published state-of-the-art band
+(0.90–0.94) — via recipes whose every ingredient carries a registered,
+mechanism-gated verdict: recurrent 256-neuron layers (two or three with
+grown skips), learnable per-neuron time constants, spike-driven temporal
+attention, 5 ms bins, three-way augmentation, and an ensemble that is
+both diverse and strong. The methodological finding is worth as much as
+the number: four literature-billed features were individually null or
+negative <em>with their mechanisms engaged</em>, and jointly worth five
+points by a frozen superadditivity test. Single-axis ablation, the
+field’s default evidence style, would have rejected every ingredient of
+the final recipe.</p>
 <h2 id="discussion">6 Discussion</h2>
 <p><strong>What the linear-with-control view actually buys.</strong>
 Four things, in the order we can defend them: (i) drift-free simulation
@@ -1077,34 +1097,37 @@ schedule for operators under training remains unaddressed (and moot for
 this library, which trains only through closed-form operators). The
 probe-richness law (§3.2) was measured with white-noise probes;
 structured probes might cross the <span class="math inline">\(m =
-N\)</span> cliff more economically. On the learning side, the diverse
-ensemble’s win suggests diversity-with-member-strength as the next
-registered experiment, and the reset-free “PSN-mode” variant — the one
-route to time-parallel training — awaits a registered accuracy study
-before it can be entertained.</p>
+N\)</span> cliff more economically. On the learning side, the ensemble
+axis now rests — the diversity-with-strength follow-up was run and won
+(0.9366), and the pool of qualitatively distinct strong recipes is
+exhausted; further gains would need new architectures or registered
+member-selection studies. Meanwhile the reset-free “PSN-mode” variant —
+the one route to time-parallel training — awaits a registered accuracy
+study before it can be entertained.</p>
 <h2 id="conclusion">7 Conclusion</h2>
 <p>Treating a spiking network as what it mathematically is — an exactly
 linear system punctuated by threshold decisions, with resets riding the
 control channel — yields a simulator that cannot drift at no extra cost,
 an identification pathway with oracle-grade accuracy and now-quantified
 failure laws, and a training loop whose only approximation is the
-surrogate gradient — a loop that carried a laptop-trained network to an
-honest 0.918 on SHD, inside the published state-of-the-art band. The
-same investigation, pursued with externally verifiable pre-registration,
-delimits the idea sharply: the operator view adds nothing to what was
-already linear, fails (so far) to cross the spike discontinuity for
-genuinely nonlinear neurons, trades away time-parallelism for its
-exactness, and demands full-rank excitation, engaged-mechanism checks,
-and honesty about seed noise from anyone who uses it. Its accuracy story
-carries a warning for the field’s evidence habits: every ingredient of
-the final recipe was null or negative in isolation and the recipe works
-only jointly — single-axis ablation would have rejected all of it. Both
-halves — the capabilities and the limits — are enforced by tests, frozen
-protocols, and logs in the accompanying repository, which we offer as
-much as a methodological artifact as a software one.</p>
+surrogate gradient — a loop that carried laptop-trained networks to an
+honest 0.937 on SHD, in the upper region of the published
+state-of-the-art band. The same investigation, pursued with externally
+verifiable pre-registration, delimits the idea sharply: the operator
+view adds nothing to what was already linear, fails (so far) to cross
+the spike discontinuity for genuinely nonlinear neurons, trades away
+time-parallelism for its exactness, and demands full-rank excitation,
+engaged-mechanism checks, and honesty about seed noise from anyone who
+uses it. Its accuracy story carries a warning for the field’s evidence
+habits: every ingredient of the final recipe was null or negative in
+isolation and the recipe works only jointly — single-axis ablation would
+have rejected all of it. Both halves — the capabilities and the limits —
+are enforced by tests, frozen protocols, and logs in the accompanying
+repository, which we offer as much as a methodological artifact as a
+software one.</p>
 <h2 id="reproducibility-statement">Reproducibility statement</h2>
 <p>The library, all experiment harnesses, raw logs, pre-registration
-documents (<code>docs/04</code>–<code>25</code>, with results in the
+documents (<code>docs/04</code>–<code>27</code>, with results in the
 adjacent documents), and this paper’s figure-generation scripts are in
 the repository; from campaign round 6 onward each protocol’s commit was
 pushed before its runs, so the ordering is hash-verifiable. The test
