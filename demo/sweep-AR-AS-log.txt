@@ -1,0 +1,49 @@
+    Finished `release` profile [optimized] target(s) in 0.05s
+     Running `target/release/examples/shd_sweep AR AS --threads 16`
+loading SHD …
+8156 train / 2264 test samples
+
+### [AR] diverse ensemble ["AK", "AP", "X"] — one member each at seed_bump 0, summed logits, threads 16
+  training member [AK] COMBINATION: attention + learnable tau + 5 ms bins, X recipe
+    [AK] step  1500: loss 0.4189
+    [AK] step  3000: loss 0.2036
+    [AK] step  4500: loss 0.0438
+    [AK] step  6000: loss 0.0650
+  training member [AP] AK recipe + third recurrent layer + zero-init skips
+    [AP] step  1500: loss 0.7160
+    [AP] step  3000: loss 0.2279
+    [AP] step  4500: loss 0.2034
+    [AP] step  6000: loss 0.1484
+  training member [X] two recurrent layers 256-256, R recipe
+    [X] step  1500: loss 0.5574
+    [X] step  3000: loss 0.4278
+    [X] step  4500: loss 0.2203
+    [X] step  6000: loss 0.1995
+  RESULT [AR]: test accuracy 0.9366 (2098/2240), train 2487.1s
+
+### [AS] diverse ensemble ["AK", "AP", "AJ", "X"] — one member each at seed_bump 0, summed logits, threads 16
+  training member [AK] COMBINATION: attention + learnable tau + 5 ms bins, X recipe
+    [AK] step  1500: loss 0.4189
+    [AK] step  3000: loss 0.2036
+    [AK] step  4500: loss 0.0438
+    [AK] step  6000: loss 0.0650
+  training member [AP] AK recipe + third recurrent layer + zero-init skips
+    [AP] step  1500: loss 0.7160
+    [AP] step  3000: loss 0.2279
+    [AP] step  4500: loss 0.2034
+    [AP] step  6000: loss 0.1484
+  training member [AJ] X recipe + spike-driven temporal attention
+    [AJ] step  1500: loss 0.5440
+    [AJ] step  3000: loss 0.2070
+    [AJ] step  4500: loss 0.1563
+    [AJ] step  6000: loss 0.1634
+  training member [X] two recurrent layers 256-256, R recipe
+    [X] step  1500: loss 0.5574
+    [X] step  3000: loss 0.4278
+    [X] step  4500: loss 0.2203
+    [X] step  6000: loss 0.1995
+  RESULT [AS]: test accuracy 0.9335 (2091/2240), train 2825.7s
+
+## Summary (chance = 0.050)
+| tag | seed_bump | test acc | final loss | train (s) |
+|---|---|---|---|---|

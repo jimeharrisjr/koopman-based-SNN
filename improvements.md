@@ -64,12 +64,14 @@ ensemble, and margins under ~3 points are reported as inconclusive.
    connections recover 3.0 of them (W_skip grown to 3.6–4.4, gate 3/3) but
    enabled depth only ties two layers (+0.5, NULL). Skips ship validated
    in the library (`with_skip`) for any larger-scale attempt.
-6. **Diverse ensembles.** ✅ *Run 2026-08-28 — DIVERSITY WINS, new campaign
-   headline* (docs/22–23): {AK, AJ, X} summed logits = **0.9179**, three
-   points above its best member and +1.8 over the homogeneous AN, from
-   members averaging just 0.873. Decorrelation across readouts and bin
-   widths beats member strength. Eligible registered follow-up: diversity
-   WITH member strength.
+6. **Diverse ensembles.** ✅ *Runs 2026-08-28 — the campaign's closing
+   wins* (docs/22–23, 27–28): diverse-weak {AK, AJ, X} = 0.9179; the
+   registered follow-up AR {AK, AP, X} = **0.9366**, firing the 0.92
+   milestone round 5 registered and missed. Adding the weak member back
+   (AS) cost 0.3 — strength and diversity are complements: homogeneous
+   0.9000 < diverse-weak 0.9179 < diverse-strong 0.9366. The ensemble
+   axis rests here; the member pool of distinct strong recipes is
+   exhausted.
 
 **P1 status: CONCLUDED (2026-08-28).** Every item carries a registered
 outcome; campaign scoreboard 0.502 → **0.9179**. Remaining open work: P2

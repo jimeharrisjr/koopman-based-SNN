@@ -508,3 +508,36 @@ mixing configs with different bin widths and readouts. Raw logs:
 
 **The P1 accuracy program concludes: 0.502 → 0.9179**, the last five
 rounds fully pre-registered with frozen rules and every negative kept.
+
+## Round 11 — diversity WITH member strength (pre-registered: docs/27) — **AR 0.9366; the 0.92 target falls**
+
+The follow-up round 10 unlocked: swap the diverse ensemble's weakest
+member (AJ, 0.8504) for the strongest recipe on record (AP, 0.9018), with
+every member draw known in advance by determinism. Raw log:
+`sweep-AR-AS-log.txt`; full analysis: docs/28.
+
+| arm | members | result | Δ vs AQ | verdict |
+|---|---|---|---|---|
+| **AR** | AK + AP + X | **0.9366** (2098/2240) | **+0.0187** | **POSITIVE** |
+| AS | + AJ | 0.9335 | +0.0156 | POSITIVE (below AR) |
+
+- **Round 5's registered-and-missed 0.92 target formally falls at
+  0.9366** — near the top of the published band — and the round-5
+  diagnosis ("a library-feature project, not a sweep away") is vindicated
+  item by item: every ingredient between 0.88 and here was a built,
+  gated, registered library feature.
+- **Strength and diversity are complements, not substitutes** (Z2
+  refuted): adding the weak fourth member back cost 0.3 points. Across
+  rounds 9–11: homogeneous-strong 0.9000 < diverse-weak 0.9179 <
+  diverse-strong 0.9366 — an ensemble buys the most when members are
+  strong AND fail differently.
+
+### FINAL campaign scoreboard (eleven rounds)
+
+| headline | value |
+|---|---|
+| **best honest number** | **0.9366** (AR, diverse-strong ensemble) |
+| diverse-weak / homogeneous ensembles | 0.9179 (AQ) / 0.9000 (AN) |
+| best 3-seed mean | 0.8935 (AP) / 0.8888 (AK) |
+| best single training run | 0.9116 (AK seed 200) |
+| starting point | 0.502 |
