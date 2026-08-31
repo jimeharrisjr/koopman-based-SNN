@@ -541,3 +541,28 @@ every member draw known in advance by determinism. Raw log:
 | best 3-seed mean | 0.8935 (AP) / 0.8888 (AK) |
 | best single training run | 0.9116 (AK seed 200) |
 | starting point | 0.502 |
+
+## Round 12 — the PSN-mode study (pre-registered: docs/29) — **the parallelism tax is 2.5 points, and recurrence is free**
+
+The registered study docs/24 deferred: what does the time-parallelizable
+model class (no reset, no recurrence) cost? New library support:
+`KoopmanLayer::without_reset` (spikes become a pure threshold readout of
+the free linear trajectory — the PSN class), state-trajectory and
+training gates. Raw log: `sweep-AT-AU-log.txt`; full analysis: docs/30.
+
+| arm | mean ± half-range | Δ vs AK | verdict |
+|---|---|---|---|
+| AT (no reset, no recurrence) | 0.8634 ± 0.0286 | **−0.0254** | NEGATIVE |
+| AU (no reset, recurrent) | 0.8659 ± 0.0317 | −0.0229 | NEGATIVE |
+
+- **Decomposition:** the subtractive reset is worth **+2.3 points** (the
+  first direct price on the library's central design decision — point
+  estimate was −2); **recurrence adds ≈ 0** given the modern recipe
+  (−0.25; round 2's +12.8 has been fully absorbed by attention + 5 ms +
+  learned τ).
+- **The deferral stands by the frozen rule, but the door is ajar:** the
+  parallelizable class costs 2.5 points — five-fold less than predicted —
+  and already trains 2.4× faster sequentially (feedforward steps).
+- Round-13 qualification (bar frozen before these numbers existed):
+  AU's bump-0 draw 0.8737 **qualifies** for the ensemble pool; AT's
+  0.8589 does not.
