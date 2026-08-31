@@ -627,6 +627,44 @@ const EXPERIMENTS: &[ExpConfig] = &[
     },
 ];
 
+// Round 13 (docs/31): candidate new-architecture ensemble members.
+const ROUND13_CONFIGS: &[ExpConfig] = &[
+    // AV: a different NEURON MODEL under the modern recipe — heterogeneous
+    // adaptive LIF (k = 3, per-neuron random taus, spike-triggered
+    // adaptation). Adaptation's registered retest inside the combination
+    // era (round 4 tested it on the count/10 ms recipe only). learn_tau
+    // stays off (the tau-learning path is LIF-only).
+    ExpConfig {
+        tag: "AV",
+        name: "ALIF-hetero under the modern recipe (attention, 5 ms, recurrent)",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        neuron: NeuronKind::AlifHetero,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        ..BASE
+    },
+    // AW: a different SHAPE — wide single layer at full modern spec.
+    ExpConfig {
+        tag: "AW",
+        name: "wide 1x512 under the modern recipe (attention, learned tau, 5 ms)",
+        n_pooled: 350,
+        hidden: &[512],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        ..BASE
+    },
+];
+
 /// Diverse-ensemble arms: each is a list of member tags, one member per
 /// config (seed_bump 0), combined by summed logits.
 /// AQ (docs/22): diversity with weak members. AR/AS (docs/27): diversity
@@ -884,6 +922,7 @@ fn run_diverse_ensemble(
         .map(|t| {
             EXPERIMENTS
                 .iter()
+                .chain(ROUND13_CONFIGS.iter())
                 .find(|e| e.tag == *t)
                 .expect("diverse member tag exists")
         })
@@ -1172,6 +1211,7 @@ fn main() {
     } else {
         EXPERIMENTS
             .iter()
+            .chain(ROUND13_CONFIGS.iter())
             .filter(|e| args.iter().any(|a| a == e.tag))
             .collect()
     };
