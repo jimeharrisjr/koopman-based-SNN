@@ -76,6 +76,11 @@ struct ExpConfig {
     /// layer also reads the layer two below through W_skip, grown from
     /// nothing by training.
     skip: bool,
+    /// PSN-mode (docs/29): remove all spike-triggered jumps including the
+    /// subtractive reset; spikes become a pure threshold readout of the free
+    /// linear trajectory — the model class that permits time-parallel
+    /// training.
+    no_reset: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -121,6 +126,7 @@ const BASE: ExpConfig = ExpConfig {
     readout: TemporalReadout::Count,
     augment_extra: false,
     skip: false,
+    no_reset: false,
 };
 
 /// Adaptation defaults for the ALIF rounds (dt = 10 ms bins): τ_w = 150 ms
@@ -570,6 +576,40 @@ const EXPERIMENTS: &[ExpConfig] = &[
         t_steps: 200,
         ..BASE
     },
+    // Round 12 (docs/29): the PSN-mode accuracy-vs-parallelism study.
+    // AT = every parallelism-compatible modern ingredient, no reset, no
+    // recurrence (the time-parallelizable class); AU = no reset but WITH
+    // recurrence (the ablation isolating the reset's own contribution).
+    ExpConfig {
+        tag: "AT",
+        name: "PSN-mode: no reset, feedforward, attention + learned tau + 5 ms",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: false,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        no_reset: true,
+        ..BASE
+    },
+    ExpConfig {
+        tag: "AU",
+        name: "no-reset ablation: AK recipe minus the subtractive reset",
+        n_pooled: 350,
+        hidden: &[256, 256],
+        minibatches: 6000,
+        recurrent: true,
+        augment: true,
+        learn_tau: true,
+        readout: TemporalReadout::Attention,
+        bin_s: 0.005,
+        t_steps: 200,
+        no_reset: true,
+        ..BASE
+    },
     ExpConfig {
         tag: "AP",
         name: "AK recipe + third recurrent layer + zero-init skips",
@@ -760,6 +800,9 @@ fn build_network(cfg: &ExpConfig, seed_bump: u64) -> Network {
         if cfg.skip && l >= 2 {
             // Zero-init: exactly the plain chain at step 0 (docs/22).
             layer = layer.with_skip(Mat::zeros(n, widths[l - 2])).unwrap();
+        }
+        if cfg.no_reset {
+            layer = layer.without_reset();
         }
         layers.push(layer);
         widths.push(n);

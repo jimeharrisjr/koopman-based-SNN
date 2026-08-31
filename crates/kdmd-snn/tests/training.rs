@@ -797,6 +797,93 @@ fn skip_connections_grow_from_zero_and_train() {
 }
 
 #[test]
+fn no_reset_state_follows_the_free_trajectory() {
+    // PSN-mode gate (docs/29): with all jumps removed, the state must equal
+    // the free linear trajectory exactly — identical to a layer whose
+    // threshold is unreachably high — while spikes remain the threshold
+    // readout of that trajectory.
+    let lif = Lif::new(LifParams {
+        dt: DT,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let never = Lif::new(LifParams {
+        dt: DT,
+        theta: 1e12,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let n = 8;
+    let mut rng = StdRng::seed_from_u64(151);
+    let w = Mat::from_fn(n, N_IN, |_, _| rng.random_range(0.0..1.2));
+    let mut psn = KoopmanLayer::lif(&lif, n, w.clone(), BATCH)
+        .unwrap()
+        .without_reset();
+    let mut free = KoopmanLayer::lif(&never, n, w, BATCH).unwrap();
+    let mut net_a = Network::new(vec![psn.clone_with_batch(BATCH).unwrap()], BATCH).unwrap();
+    let mut net_b = Network::new(vec![free.clone_with_batch(BATCH).unwrap()], BATCH).unwrap();
+    let _ = (&mut psn, &mut free);
+
+    let mut rng = StdRng::seed_from_u64(157);
+    let mut spiked = false;
+    for t in 0..300 {
+        let mut s_in = SpikeBatch::zeros(N_IN, BATCH).unwrap();
+        for b in 0..BATCH {
+            for i in 0..N_IN {
+                if rng.random::<f64>() < 0.2 {
+                    s_in.as_mat_mut()[(i, b)] = 1.0;
+                }
+            }
+        }
+        let sa = net_a.step_batch(&s_in).unwrap().as_mat().to_owned();
+        net_b.step_batch(&s_in).unwrap();
+        spiked |= (0..BATCH).any(|b| (0..n).any(|i| sa[(i, b)] == 1.0));
+        for i in 0..2 * n {
+            for b in 0..BATCH {
+                assert_eq!(
+                    net_a.state(0).as_mat()[(i, b)],
+                    net_b.state(0).as_mat()[(i, b)],
+                    "no-reset state left the free trajectory at step {t}, row {i}"
+                );
+            }
+        }
+    }
+    assert!(spiked, "the no-reset layer never spiked — drive too weak to gate");
+}
+
+#[test]
+fn no_reset_mode_trains() {
+    // PSN-mode training gate: finite, decreasing loss with jumps removed
+    // (the reset backward path vanishes automatically with zero jumps).
+    let lif = Lif::new(LifParams {
+        dt: DT,
+        ..LifParams::default()
+    })
+    .unwrap();
+    let mut rng = StdRng::seed_from_u64(163);
+    let w = Mat::from_fn(N_HIDDEN, N_IN, |_, _| rng.random_range(0.0..0.6));
+    let layer = KoopmanLayer::lif(&lif, N_HIDDEN, w, BATCH)
+        .unwrap()
+        .without_reset();
+    let mut net = Network::new(vec![layer], BATCH).unwrap();
+    let mut trainer = Trainer::new(&net, N_CLASSES, TrainConfig::default()).unwrap();
+    let task = PoissonPatternTask::new(N_IN, N_CLASSES, 0.12, 0.01, 0.4, &mut rng).unwrap();
+    let mut losses = Vec::new();
+    for step in 0..200 {
+        let (inputs, targets) = minibatch(&task, &mut rng);
+        let stats = trainer.train_step(&mut net, &inputs, &targets).unwrap();
+        assert!(stats.loss.is_finite(), "loss diverged at step {step}");
+        losses.push(stats.loss);
+    }
+    let early: f64 = losses[..20].iter().sum::<f64>() / 20.0;
+    let late: f64 = losses[losses.len() - 20..].iter().sum::<f64>() / 20.0;
+    assert!(
+        late < 0.7 * early,
+        "no-reset training did not reduce the loss: early {early:.4}, late {late:.4}"
+    );
+}
+
+#[test]
 fn learned_tau_and_attention_compose() {
     // The combination round (docs/18) runs learnable τ and the attention
     // readout together for the first time; this gate proves the two

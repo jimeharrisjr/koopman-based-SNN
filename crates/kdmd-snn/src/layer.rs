@@ -198,6 +198,21 @@ impl KoopmanLayer {
         Ok(self)
     }
 
+    /// PSN-mode (docs/24 §4, registered study docs/29): remove ALL
+    /// spike-triggered jumps, including the subtractive reset. The state
+    /// then follows the free linear trajectory regardless of spiking, and
+    /// spikes are a pure threshold *readout* of that trajectory — the model
+    /// class of Fang et al.'s Parallel Spiking Neuron, and the only one in
+    /// this library whose training could be restructured time-parallel.
+    /// This deliberately relaxes the fast path's reset-mandatory design
+    /// decision (Q5) for the registered accuracy-vs-parallelism trade study.
+    pub fn without_reset(mut self) -> Self {
+        for j in self.jumps.iter_mut() {
+            *j = 0.0;
+        }
+        self
+    }
+
     /// Per-neuron input-coupling override (`k × N`), for heterogeneous
     /// layers where δ and 1−β differ per neuron.
     pub fn with_coupling(mut self, coupling: Mat<f64>) -> Result<Self, SnnError> {
