@@ -674,6 +674,10 @@ const DIVERSE_ARMS: &[(&str, &[&str])] = &[
     ("AQ", &["AK", "AJ", "X"]),
     ("AR", &["AK", "AP", "X"]),
     ("AS", &["AK", "AP", "AJ", "X"]),
+    // AX (docs/31): the frozen qualification rule (bump-0 >= 0.8700) admitted
+    // ALL THREE candidates - AU 0.8737, AV 0.8871, AW 0.8759 - so the arm is
+    // {AK, AP, X} + qualifiers, mechanically. No selection discretion.
+    ("AX", &["AK", "AP", "X", "AU", "AV", "AW"]),
 ];
 
 /// Train-time augmentation on the raw event stream: per-event dropout, a
