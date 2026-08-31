@@ -130,6 +130,20 @@ the adLIF gate, `baselines/`).
 (docs/25–26), each correcting or sharpening a docs/01 claim; items 4–5
 below remain closed/moot by standing decision.
 
+## Backlog — for future consideration
+
+- **PSN-mode time-parallel training** (plan of record: `docs/33`, drafted
+  2026-08-31; NOT registered, no runs authorized). Restructure training
+  for the (feedforward ∧ no-reset) class into batched matmuls +
+  elementwise IIR scans — the identical model, equivalence-gated, at an
+  estimated several-fold speedup on top of the class's existing 2.4×.
+  Round 12 priced the accuracy trade at 2.5 pts (reset +2.3, recurrence
+  ≈ 0); the plan carries a docs/09-style speed kill-criterion (calibrate
+  X before freezing) and a PSN-XL scale arm testing whether freed compute
+  buys the tax back. Pick-up triggers: long-sequence targets (T ≳ 1000),
+  GPU/SIMD port, sweep-compute bottleneck, or a matched-cost spiking-SSM
+  baseline for the paper.
+
 **Post-roadmap rounds (2026-08-31, docs/29–32):** Round 12 priced the
 PSN-mode trade — the time-parallelizable class costs 2.5 pts (reset
 +2.3, recurrence ≈ 0 in the modern recipe; the docs/24 deferral stands
