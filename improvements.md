@@ -130,6 +130,15 @@ the adLIF gate, `baselines/`).
 (docs/25–26), each correcting or sharpening a docs/01 claim; items 4–5
 below remain closed/moot by standing decision.
 
+**Post-roadmap rounds (2026-08-31, docs/29–32):** Round 12 priced the
+PSN-mode trade — the time-parallelizable class costs 2.5 pts (reset
++2.3, recurrence ≈ 0 in the modern recipe; the docs/24 deferral stands
+but the door is measurably ajar). Round 13 grew the member pool (AV
+ALIF-hetero NULL — adaptation redeemed; AW wide-512 NULL, tightest seed
+spread on record; all candidates qualified under the pre-frozen bar) and
+found **ensemble saturation**: AX (six members) = 0.9379 ≈ AR's 0.9366.
+The pool-growth avenue closes at this architecture generation.
+
 4. **Nonlinear-surrogate track — reopen only with the two named
    ingredients.** V2/V2b closed as pre-registered failures (`docs/05`,
    `docs/08`). The record points at exactly two missing pieces: a dedicated

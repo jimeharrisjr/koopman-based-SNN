@@ -566,3 +566,35 @@ training gates. Raw log: `sweep-AT-AU-log.txt`; full analysis: docs/30.
 - Round-13 qualification (bar frozen before these numbers existed):
   AU's bump-0 draw 0.8737 **qualifies** for the ensemble pool; AT's
   0.8589 does not.
+
+## Round 13 — growing the member pool (pre-registered: docs/31) — **all candidates qualify; the ensemble SATURATES at 0.9379**
+
+Two genuinely new architectures under the modern recipe, then the
+enlarged ensemble, all under a qualification rule frozen before any
+candidate number existed. Raw logs: `sweep-AV-AW-log.txt`,
+`sweep-AX-log.txt`; full analysis: docs/32.
+
+| run | mean (3 seeds) | Δ vs AK | bump-0 | outcome |
+|---|---|---|---|---|
+| AV (ALIF-hetero modern) | 0.8865 ± 0.0237 | −0.0023 NULL | 0.8871 | qualifies |
+| AW (wide 512 modern) | 0.8799 ± 0.0038 | −0.0089 NULL | 0.8759 | qualifies |
+| **AX** = {AK, AP, X, AU, AV, AW} | **0.9379** (2101/2240) | +0.0013 vs AR | — | **NULL — saturation** |
+
+- **Adaptation is redeemed**: −3.7 in round 4's recipe, NULL (−0.2) in
+  the combination era, one seed at 0.9098 — sealing the campaign's
+  central lesson that feature × recipe pairs, not features, are the unit
+  of evidence.
+- **The ensemble axis saturates**: six members spanning five
+  architectures and three dynamics classes beat the three-member AR by
+  three test samples. Best honest number 0.9379 ≈ 0.9366; the 0.94
+  milestone did not fire; the ~140 jointly-missed samples are the
+  residual every architecture in this library agrees on.
+- Predictions 4/5 (U4 half).
+
+### FINAL campaign scoreboard (thirteen rounds)
+
+| headline | value |
+|---|---|
+| **best honest number** | **0.9379** (AX) ≈ 0.9366 (AR) — saturated plateau |
+| best 3-seed mean / best single run | 0.8935 (AP) / 0.9116 (AK seed 200) |
+| starting point | 0.502 |

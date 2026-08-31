@@ -1,0 +1,41 @@
+    Finished `release` profile [optimized] target(s) in 0.05s
+     Running `target/release/examples/shd_sweep AX --threads 16`
+loading SHD …
+8156 train / 2264 test samples
+
+### [AX] diverse ensemble ["AK", "AP", "X", "AU", "AV", "AW"] — one member each at seed_bump 0, summed logits, threads 16
+  training member [AK] COMBINATION: attention + learnable tau + 5 ms bins, X recipe
+    [AK] step  1500: loss 0.4189
+    [AK] step  3000: loss 0.2036
+    [AK] step  4500: loss 0.0438
+    [AK] step  6000: loss 0.0650
+  training member [AP] AK recipe + third recurrent layer + zero-init skips
+    [AP] step  1500: loss 0.7160
+    [AP] step  3000: loss 0.2279
+    [AP] step  4500: loss 0.2034
+    [AP] step  6000: loss 0.1484
+  training member [X] two recurrent layers 256-256, R recipe
+    [X] step  1500: loss 0.5574
+    [X] step  3000: loss 0.4278
+    [X] step  4500: loss 0.2203
+    [X] step  6000: loss 0.1995
+  training member [AU] no-reset ablation: AK recipe minus the subtractive reset
+    [AU] step  1500: loss 0.4085
+    [AU] step  3000: loss 0.3319
+    [AU] step  4500: loss 0.1671
+    [AU] step  6000: loss 0.0942
+  training member [AV] ALIF-hetero under the modern recipe (attention, 5 ms, recurrent)
+    [AV] step  1500: loss 1.0335
+    [AV] step  3000: loss 0.3113
+    [AV] step  4500: loss 0.1942
+    [AV] step  6000: loss 0.1916
+  training member [AW] wide 1x512 under the modern recipe (attention, learned tau, 5 ms)
+    [AW] step  1500: loss 0.3392
+    [AW] step  3000: loss 0.3799
+    [AW] step  4500: loss 0.1918
+    [AW] step  6000: loss 0.1438
+  RESULT [AX]: test accuracy 0.9379 (2101/2240), train 8462.8s
+
+## Summary (chance = 0.050)
+| tag | seed_bump | test acc | final loss | train (s) |
+|---|---|---|---|---|
