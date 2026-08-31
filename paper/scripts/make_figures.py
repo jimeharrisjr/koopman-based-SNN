@@ -399,6 +399,7 @@ def fig7_campaign():
         ("round 9\nensemble\n×3", 0.9000),
         ("round 10\ndiverse\nensemble", 0.9179),
         ("round 11\ndiverse +\nstrong", 0.9366),
+        ("rounds 12–13\nnew classes:\nsaturation", 0.9379),
     ]
     xs = np.arange(len(stages))
     ys = [s[1] for s in stages]
@@ -406,11 +407,11 @@ def fig7_campaign():
     ax.axhspan(0.48, 0.71, color=st.BAND_FF, zorder=0)
     ax.axhspan(0.71, 0.83, color=st.BAND_REC, zorder=0)
     ax.axhspan(0.90, 0.94, color=st.SEQ100, zorder=0)
-    ax.text(9.55, 0.60, "published\nfeedforward SNNs", fontsize=8, color=st.MUTED,
+    ax.text(10.6, 0.60, "published\nfeedforward SNNs", fontsize=8, color=st.MUTED,
             ha="left", va="center")
-    ax.text(9.55, 0.77, "published\nrecurrent SNNs", fontsize=8, color=st.MUTED,
+    ax.text(10.6, 0.77, "published\nrecurrent SNNs", fontsize=8, color=st.MUTED,
             ha="left", va="center")
-    ax.text(9.62, 0.985, "published state of the art", fontsize=8, color=st.INK2,
+    ax.text(9.0, 0.985, "published state of the art", fontsize=8, color=st.INK2,
             ha="right", va="center")
     ax.errorbar([3, 4, 6], [0.850, 0.856, 0.8888],
                 yerr=[[0.027, 0.036, 0.019], [0.027, 0.036, 0.019]],
@@ -423,9 +424,9 @@ def fig7_campaign():
         ax.annotate(f"{y:.3f}", xy=(x, y), xytext=(0, 8),
                     textcoords="offset points", ha="center", fontsize=8.7,
                     color=st.INK)
-    ax.set_xticks(xs, [s[0] for s in stages], fontsize=6.8)
+    ax.set_xticks(xs, [s[0] for s in stages], fontsize=6.3)
     ax.set_ylabel("SHD test accuracy")
-    ax.set_xlim(-0.4, 11.7)
+    ax.set_xlim(-0.4, 12.7)
     ax.set_ylim(0.46, 0.96)
     ax.grid(axis="x", visible=False)
     fig.savefig(OUT / "fig10-campaign.png")

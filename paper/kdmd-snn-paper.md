@@ -1,7 +1,7 @@
 # Spiking Neural Networks as Linear Systems with Control: DMDc Identification, Exact Propagators, and Surrogate-Gradient Training on the Spiking Heidelberg Digits
 
 **James Harris**
-*Draft v2.1 — August 2026 (revised with campaign rounds 6–11 and the
+*Draft v2.2 — August 2026 (revised with campaign rounds 6–13 and the
 measurement studies of docs/25–26)*
 
 Code, logs, and pre-registered protocols: <https://github.com/jimeharrisjr/koopman-based-SNN>
@@ -32,22 +32,29 @@ recurrence beats the leak bound* — and two pre-registered *negative* results
 on lifted linear surrogates of genuinely nonlinear neuron models, joined by
 a mapped feasibility frontier for reduced-order spiking rollouts whose rate
 dependence inverts our own registered prediction. Finally, we show that the
-exact formulation supports practical learning. An eleven-round
-experimental campaign on the Spiking Heidelberg Digits (SHD) — the last six
-rounds pre-registered with frozen decision rules, the protocol commit
-pushed before each run — takes hand-rolled surrogate-gradient training from
-50.2% to an honest **93.7%** (an ensemble of three strong, architecturally
-diverse recipes), with a 3-seed-mean best recipe at 89.4% and a best single
-run of 91.2%, in the upper region of the published state-of-the-art
-band. The campaign's structure is its second contribution:
+exact formulation supports practical learning. A thirteen-round
+experimental campaign on the Spiking Heidelberg Digits (SHD) — the last
+eight rounds pre-registered with frozen decision rules, the protocol
+commit pushed before each run — takes hand-rolled surrogate-gradient
+training from 50.2% to an honest **93.8%**, a diverse-ensemble plateau
+(93.66–93.79% across three-to-six members) in the upper region of the
+published state-of-the-art band, with a 3-seed-mean best recipe at 89.4%
+and a best single run of 91.2%. Closing ablations price the formulation's
+own ingredients: the subtractive reset is worth +2.3 points, recurrence's
+famous contribution is fully absorbed by modern readouts and time
+resolution, and the time-parallelizable reset-free class trails by only
+2.5 points. The campaign's structure is its second contribution:
 four literature-billed features (adaptation, learned time constants, static
 and attention readouts) each measured null-or-negative *in isolation* with
 their mechanisms demonstrably engaged, then proved jointly worth five
 points by a frozen superadditivity test — the gap lived in interactions all
-along — and a three-step ensemble ladder (homogeneous 0.900 <
-diverse-weak 0.918 < diverse-strong 0.937) showing member strength and
-member diversity are complements, not substitutes. A seed audit (±2.7 to
-±3.6 points across weight initializations)
+along — a conclusion sealed when adaptation, negative on the early recipe,
+was redeemed to null on the final one. An ensemble ladder (homogeneous
+0.900 < diverse-weak 0.918 < diverse-strong 0.937, saturating at 0.938
+under six architectures) shows member strength and member diversity are
+complements, not substitutes — and that the ensemble ceiling is a
+property of the model generation, not the pool size. A seed audit (±2.7
+to ±3.6 points across weight initializations)
 disciplines every claim. All training runs on a laptop CPU, and every
 number reported here has a log file in the repository.
 
@@ -97,7 +104,7 @@ follow, and each is tested in this paper:
 3. **Trainable exactness.** Surrogate-gradient backpropagation through time,
    with the surrogate as the *only* approximation in the training loop, trains
    these networks on real neuromorphic data (§5) — culminating in an honest
-   0.937 on SHD, in the upper region of the published state-of-the-art band.
+   0.938 on SHD, in the upper region of the published state-of-the-art band.
 
 The paper is organized to be as useful to a skeptic as to an enthusiast.
 Section 2 gives the theory. Section 3 presents identification, including a
@@ -187,7 +194,12 @@ Second, the same trick extends to spike-triggered adaptation: an adaptive LIF
 spike-triggered increment is just another fixed jump carried by $u$, enlarging
 $A_{\mathrm{loc}}$ to $3 \times 3$ while preserving exact linearity between
 spikes. The library implements both under the same spike-for-spike
-equivalence tests.
+equivalence tests. Third, the reset-as-control channel now carries a
+measured price: a registered ablation (§5.5) finds the subtractive reset
+worth **+2.3 points** of SHD accuracy over a reset-free variant whose
+spikes merely read out the free trajectory — the reset's charge-metering
+converts amplitude into count, where the reset-free code clips everything
+above threshold into duration.
 
 In Koopman-theoretic terms (§2.4) the situation is unusually clean: the
 observables that linearize the flow are the state variables themselves, and
@@ -642,6 +654,7 @@ per-experiment tables: repository, `demo/RESULTS.md`).
 | Round 9 (AN) | ensemble ×3 of AK | **0.900** |
 | Round 10 (AQ) | diverse ensemble {AK, AJ, X} | **0.918** |
 | Round 11 (AR) | diverse ensemble of the strongest recipes {AK, AP, X} | **0.937** |
+| Rounds 12–13 | new dynamics classes and architectures; six-member ensemble | **0.938** (saturation) |
 
 \*The first demo evaluated on a 512-sample subset; all subsequent numbers use
 the full protocol of §5.2. Rounds 3–4 were originally reported from single
@@ -674,15 +687,15 @@ unaugmented network (O) drives training loss to 0.038 and *loses* 9.6 test
 points to its augmented twin (R): the loss curves cross in the opposite
 direction of the test results.](figures/fig09-training-curves.png)
 
-![**Figure 10.** The eleven-round campaign against the published landscape.
+![**Figure 10.** The thirteen-round campaign against the published landscape.
 Shaded bands mark the approximate published ranges on SHD for feedforward
 SNNs (0.48–0.71), recurrent SNNs (0.71–0.83), and the augmented/adaptive
 state of the art (0.90–0.94). Points are honest values (3-seed means where
 audited; error bars show the measured seed spreads); the flat segment at
-rounds 5–7 is the audits and the single-axis nulls of §5.5. The final four rungs — the
-superadditive combination, its homogeneous ensemble, and the two diverse
-ensembles — climb through the published
-band.](figures/fig10-campaign.png)
+rounds 5–7 is the audits and the single-axis nulls of §5.5. The final five rungs — the
+superadditive combination, its homogeneous ensemble, and the diverse
+ensembles — climb through the published band and saturate at 0.938 under
+six architectures.](figures/fig10-campaign.png)
 
 ### 5.4 The audit: seed noise, and what survives it
 
@@ -718,7 +731,7 @@ spread at ±3.6 points across seeds — wider still than the one-layer
 band — so all seed-noise discipline below uses per-recipe measured
 spreads.
 
-### 5.5 Rounds six through eleven: single axes fail, combinations pay
+### 5.5 Rounds six through thirteen: single axes fail, combinations pay
 
 The features separating this recipe from the published 0.90+ systems were
 then implemented and tested one axis at a time, each under a frozen protocol
@@ -781,12 +794,35 @@ diversity are complements, not substitutes**: an ensemble buys the most
 when its members are strong *and* fail differently, and its weakest member
 sets a soft floor on what its vote is worth.
 
+**Rounds 12–13 closed the campaign with three ablation-grade findings.**
+A registered study of the reset-free "PSN" class — the only model class
+here that permits time-parallel training (§6) — decomposed its cost:
+removing the subtractive reset costs 2.3 points, and removing recurrence
+costs *nothing further* (−0.25, deep in noise). Round 2's +12.8 for
+recurrence — the campaign's largest single effect — has been entirely
+absorbed by the attention readout, 5 ms bins, and learned time constants;
+the time-parallelizable class trails the full recipe by just 2.5 points.
+Then two genuinely new architectures joined the pool under a
+qualification bar frozen before any of their numbers existed:
+heterogeneous *adaptive* neurons under the modern recipe landed null
+(−0.2) — **redeeming adaptation** from its −3.7 verdict on the early
+recipe and sealing the feature × recipe lesson at both ends — and a wide
+single layer landed null with the campaign's tightest seed spread
+(±0.4). All candidates qualified; the resulting six-member ensemble
+(five architectures, three dynamics classes) evaluated at **0.9379** —
+three test samples above the three-member 0.9366. **The ensemble
+saturated.** The ~140 samples all six classes still miss together are
+the residual on which every readout, depth, time resolution, and
+dynamics family in this library agrees — a ceiling belonging to the
+model generation, not the pool.
+
 ### 5.6 Where this lands
 
 A network of subtractive-reset LIF neurons trained by hand-rolled surrogate
-BPTT on a laptop reaches an honest **0.937** on SHD — the upper region of
-the published state-of-the-art band (0.90–0.94) — via recipes whose every
-ingredient carries a registered, mechanism-gated verdict: recurrent
+BPTT on a laptop reaches an honest **0.938** on SHD — a saturated
+diverse-ensemble plateau in the upper region of the published
+state-of-the-art band (0.90–0.94) — via recipes whose every ingredient
+carries a registered, mechanism-gated verdict: recurrent
 256-neuron layers (two or three with grown skips), learnable per-neuron
 time constants, spike-driven temporal attention, 5 ms bins, three-way
 augmentation, and an ensemble that is both diverse and strong. The
@@ -825,7 +861,13 @@ every step, which is precisely the structure the spiking-SSM literature
 *removes* (by dropping the reset) to obtain its parallel scans. Exact
 spiking dynamics with resets and time-parallelism are mutually exclusive in
 this model class; the supported (and sufficient, on our hardware)
-parallelism axis is the batch.
+parallelism axis is the batch. The exclusion now carries a measured price
+rather than a verdict: the registered reset-free study (§5.5) put the
+full cost of the time-parallelizable class at 2.5 points — nearly all of
+it the reset, with recurrence free to drop — and an engineering plan for
+the restructured (batched-matmul + parallel-scan) training path is on
+record in the repository as a future-consideration item, gated behind its
+own registration.
 
 **The reduced-order frontier, mapped.** The rank-$r$ value case, previously
 validated only sub-threshold, now carries a measured feasibility map for
@@ -865,10 +907,11 @@ engine-superiority claim is made; the recipe had home-field advantage.
 under training remains unaddressed (and moot for this library, which trains
 only through closed-form operators). The probe-richness law (§3.2) was
 measured with white-noise probes; structured probes might cross the
-$m = N$ cliff more economically. On the learning side, the ensemble axis now rests — the
-diversity-with-strength follow-up was run and won (0.9366), and the pool
-of qualitatively distinct strong recipes is exhausted; further gains would
-need new architectures or registered member-selection studies. Meanwhile the reset-free "PSN-mode" variant — the one
+$m = N$ cliff more economically. On the learning side, the ensemble axis is now closed by
+measurement rather than exhaustion: growing the pool with genuinely new
+architectures (adaptive neurons, new shapes, the reset-free class) moved
+the six-member ensemble three test samples past the three-member one —
+saturation at ≈ 0.938 for this model generation. Meanwhile the reset-free "PSN-mode" variant — the one
 route to time-parallel training — awaits a registered accuracy study
 before it can be entertained.
 
@@ -879,7 +922,7 @@ system punctuated by threshold decisions, with resets riding the control
 channel — yields a simulator that cannot drift at no extra cost, an
 identification pathway with oracle-grade accuracy and now-quantified failure
 laws, and a training loop whose only approximation is the surrogate
-gradient — a loop that carried laptop-trained networks to an honest 0.937
+gradient — a loop that carried laptop-trained networks to an honest 0.938
 on SHD, in the upper region of the published state-of-the-art band. The same investigation,
 pursued with externally verifiable pre-registration, delimits the idea
 sharply: the operator view adds nothing to what was already linear, fails
@@ -897,7 +940,7 @@ software one.
 ## Reproducibility statement
 
 The library, all experiment harnesses, raw logs, pre-registration documents
-(`docs/04`–`27`, with results in the adjacent documents), and this paper's
+(`docs/04`–`33`, with results in the adjacent documents), and this paper's
 figure-generation scripts are in the repository; from campaign round 6
 onward each protocol's commit was pushed before its runs, so the ordering is
 hash-verifiable. The test suite (`cargo test --release`, 128 tests)
