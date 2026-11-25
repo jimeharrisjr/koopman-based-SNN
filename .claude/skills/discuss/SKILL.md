@@ -20,9 +20,11 @@ and to produce either nothing or a well-formed idea document.
 
 2. **Clarify first, opine second.** Ask your clarifying questions — the
    ones whose answers would genuinely change the analysis (scope, success
-   criteria, constraints, what prompted the idea). Ask them in ONE message,
-   at most five, then STOP and wait for answers. Do not answer your own
-   questions. If the idea is already crystal clear, say so and move on.
+   criteria, constraints, what prompted the idea). Ask them ONE AT A TIME:
+   a single question per message, then STOP and wait for the answer before
+   asking the next. Let each answer inform (or eliminate) the questions
+   that follow; at most five in total. Do not answer your own questions.
+   If the idea is already crystal clear, say so and move on.
 
 3. **The two voices.** Once you understand the idea, present both
    perspectives in a single message, clearly labeled:
