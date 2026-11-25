@@ -143,6 +143,11 @@ below remain closed/moot by standing decision.
   buys the tax back. Pick-up triggers: long-sequence targets (T ≳ 1000),
   GPU/SIMD port, sweep-compute bottleneck, or a matched-cost spiking-SSM
   baseline for the paper.
+- **SNN char-LM probe ("snn-BERT" rung 1)** (`docs/ideas/snn-char-lm-probe.md`,
+  discussed 2026-09-01; IDEA only, no runs authorized). Causal
+  next-character SNN LM on a text8 subset in a new repo consuming
+  `kdmd-snn`; kill criterion at a context-matched linear gate, PyTorch
+  baselines, SOPs energy ledger from day one.
 
 **Post-roadmap rounds (2026-08-31, docs/29–32):** Round 12 priced the
 PSN-mode trade — the time-parallelizable class costs 2.5 pts (reset
